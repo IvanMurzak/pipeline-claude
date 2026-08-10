@@ -1,0 +1,21 @@
+.github/workflows/ci.yml
+  s_549c17689feabc::t_0b7fe25d6b9b1e 37,105,117-118
+.github/workflows/release-cli.yml
+  s_549c17689feabc::t_1cbd9f32206fb4 70,78,181,187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "2495e1d12150e4b7a552ac7e5da856644fb5495e",
+  "prompts": {},
+  "sessions": {
+    "s_549c17689feabc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_549c17689feabc",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
