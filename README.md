@@ -16,8 +16,31 @@ Two commands. The second one from the project where you want pipelines to live.
 
 ## Install
 
+**1. The plugin**, so Claude Code has the `/pipeline:*` commands:
+
+```bash
+claude plugin marketplace add IvanMurzak/pipeline-claude-marketplace
+claude plugin install pipeline@pipeline
+```
+
+Already inside Claude Code? The same two, as slash commands:
+
+```text
+/plugin marketplace add IvanMurzak/pipeline-claude-marketplace
+/plugin install pipeline@pipeline
+```
+
+**2. The CLI**, which is what actually decides what runs next. Since plugin
+0.93.0 it is required, not optional: the hooks are CLI subcommands now, and a
+session without it prints one actionable line and degrades every hook to a no-op.
+
 ```bash
 bun add -g @baizor/pipeline
+```
+
+**3. Set up the project**, from wherever you want pipelines to live:
+
+```bash
 pipeline init
 ```
 
@@ -72,14 +95,11 @@ step and changes nothing) and independently skippable: `--no-plugin`, `--no-run`
 `pipeline init <template>` to start from a different template
 (`pipeline clone --list` shows them).
 
-**Installing the plugin by hand.** It is one step of `init`. If you already have
-the CLI — or you want the plugin on its own, without a starter pipeline — run
-that step yourself from inside Claude Code:
-
-```text
-/plugin marketplace add IvanMurzak/pipeline-claude-marketplace
-/plugin install pipeline@pipeline
-```
+**`init` installs the plugin too.** Step 1 above is the same thing `init` does
+for you (it shells exactly those two commands), so doing both is harmless — a
+re-run prints a `✓` and changes nothing. Step 1 is listed first because it is the
+half that makes the commands appear, and because you may want the plugin on its
+own without a starter pipeline.
 
 **The global CLI is required, not optional.** Since plugin 0.93.0 the five hook
 relays are CLI subcommands rather than files in this repository, so a session
