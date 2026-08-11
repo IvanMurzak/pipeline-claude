@@ -302,7 +302,15 @@ This section is the practical walkthrough — install once, then a small set of 
    /pipeline:dispatch Cut a release of the API server with version 2.5.0
    ```
 
-   `/pipeline:run` is the supervisor. It spawns a single `pipeline-manager` (depth 1) that drives the chain — running a fresh `step-executor` per iteration (depth 2) and chaining forward through every iteration until the pipeline declares completion or halts on a blocker — while `/pipeline:run` stays in the main session to own UI liveness, the human-facing report, and the hours-long nested-blocker poll-wait. You'll see banners in the terminal.
+   `/pipeline:run` supervises; it does not execute.
+
+   | Depth | Who | Does |
+   |---|---|---|
+   | 0 | `/pipeline:run` | Stays in your session. Owns liveness, the human-facing report, and the hours-long nested-blocker wait. |
+   | 1 | `pipeline-manager` | Drives the chain forward until the pipeline completes or halts. |
+   | 2 | `step-executor` | One per step, each in a fresh context. |
+
+   You'll see banners in the terminal as it goes.
 
 5. **Re-read the pipeline folder afterwards.** After a successful run, `.pipeline/<pipeline-name>/` is now both a workflow definition and a knowledge base — future maintainers (and future Claude sessions) can read it cold to understand the project's release process. Commit it to git.
 
@@ -340,7 +348,14 @@ The "Excluded by Scope.Out" list shows pipelines the matcher rejected and **why*
 /pipeline:dispatch Cut a release of the API server with version 2.5.0
 ```
 
-Same first-tier match as `/pipeline:find` (stdlib BM25 + Scope.Out hard-filter). On ambiguity (top-2 BM25 scores within 2× of each other), it spawns a Haiku-based disambiguator subagent that reads the ambiguous candidates' manifests and picks one — fractions of a cent. On zero matches with chain phrasing in the task, it falls back to full-context chain detection. On a confident single match (the common case), it runs immediately with zero LLM cost on matching.
+Same first-tier match as `/pipeline:find` — stdlib BM25 plus a `Scope.Out`
+hard-filter — then it escalates only as far as it has to:
+
+| Outcome | What happens | Cost |
+|---|---|---|
+| One confident match *(the common case)* | Runs immediately. | Zero LLM cost on matching |
+| Top-2 within 2× of each other | A Haiku disambiguator reads just those manifests and picks. | Fractions of a cent |
+| Zero matches, and the task reads like a chain | Full-context chain detection in the main session. | Expensive, and rare |
 
 **Working from a GitHub issue.** Either skill accepts a URL or `owner/repo#NUMBER` instead of free-form text:
 
@@ -364,8 +379,22 @@ If `/pipeline:find` returns no candidates and the excluded list doesn't reveal a
 
 Pipelines get better over time without you intervening, on **two tiers**:
 
-- **Tier-1 (between steps).** The executor flags any iteration whose docs were ambiguous, missing a step, or pointed at the wrong tool — it emits an improvement brief in its final report. The `pipeline-manager` automatically dispatches `pipeline-improver` between iterations, so the next iteration in the chain reads updated docs. The executor also flags long deterministic Steps blocks that are paying tokens on every fresh-context run; the improver passes those to `pipeline-script-creator`, which extracts the block to a Python script under `<pipeline-root>/scripts/<name>.py` and rewrites the iteration to invoke it with one command.
-- **Tier-2 (end-of-run retrospective).** While a run is in flight, each step jots down *every* problem it hits — not just blocking ones — into a gitignored `.feedback/` folder inside your pipeline. At the end of the run the `pipeline-manager` hands the doc-related problems to one Opus `pipeline-improver` (and `pipeline-script-creator`) pass that consolidates them and fixes the pipeline's own docs in a batch. The pure-project problems it can't fix on its own — real code bugs, environment issues, general friction — are surfaced to **you** in the run's final report instead. The feedback folder is cleaned up afterward; the improvements live in the docs and the project/env problems live in the report.
+**Tier 1 — between steps.** A step that found its own docs ambiguous, missing a
+stage, or pointed at the wrong tool says so in its final report. The manager
+dispatches `pipeline-improver` before the next step, so the next step reads the
+corrected version. A step that notices a long deterministic block paying tokens
+on every run flags that too, and `pipeline-script-creator` extracts it to
+`scripts/<name>.py` and rewrites the step to one invocation.
+
+**Tier 2 — end-of-run retrospective.** While the run is in flight, every step
+writes down *every* problem it hits — not only the blocking ones — into a
+gitignored `.feedback/` folder. At the end, one Opus improver pass consolidates
+the doc-related ones and fixes the pipeline in a batch.
+
+The split matters: problems the improver cannot fix on its own — real code bugs,
+environment issues, general friction — are surfaced to **you** in the final
+report instead of being silently absorbed. The feedback folder is cleaned up
+afterwards; improvements live in the docs, project problems live in the report.
 
 You don't trigger any of this. It happens during normal `/pipeline:run` invocations. Over a few weeks of use, your pipelines drift toward "iterations contain only the parts that need agent judgment; everything else is in scripts" — which is the cheap-tokens steady state.
 
@@ -417,7 +446,17 @@ Two user-facing skills, **same matcher under the hood, different ergonomics on t
 - **`/pipeline:find <task-or-issue-url>`** — inspection variant. Deterministic-only (no LLM). Returns ranked candidates with score, matched terms, and excluded-with-reason output, then asks before running. Use when you want to see the match before committing.
 - **`/pipeline:dispatch <task>`** — autonomous variant. Same matcher in tier 1, plus an LLM tiebreaker on ambiguity (tier 2) and a chain-detection fallback on no match (tier 3). Auto-runs without confirmation. Use when you trust the matcher to decide.
 
-Both share the `pipeline match` command (`apps/pipeline-cli`, run with Bun) — it scores each pipeline's manifest with Okapi BM25 over the **positive corpus** (name + `End State` + `Scope.In` + `Glossary`) and hard-filters on the **negative corpus** (`Scope.Out`) via keyword overlap. The corpus split exists because BM25 (and embeddings) don't naturally understand negation — to a frequency-based scorer, "update the database schema" and "do not update the database schema" share most of their tokens and look similar. The structural fix is to score the positive bucket and filter the negative bucket separately. A pipeline whose `Scope.Out` reads "database schema migrations" is excluded — with an explicit reason — from a task that mentions "database schema", instead of being ranked alongside the actually-relevant pipeline.
+Both share the `pipeline match` command — Okapi BM25 over a **positive corpus**
+(name, `End State`, `Scope.In`, `Glossary`), hard-filtered by a **negative
+corpus** (`Scope.Out`) on keyword overlap.
+
+The split exists because frequency scorers do not understand negation. To BM25 —
+and to embeddings — *"update the database schema"* and *"do not update the
+database schema"* share almost every token and look alike. Scoring one bucket and
+filtering the other is the structural fix. So a pipeline whose `Scope.Out` reads
+"database schema migrations" is **excluded, with the reason stated**, from a task
+mentioning "database schema" — rather than ranked next to the pipeline you
+actually wanted.
 
 ### `/pipeline:dispatch`'s three-tier cost ladder
 
@@ -457,9 +496,33 @@ The matcher and the disambiguator both live in this plugin — nothing to instal
 
 Pipelines get better over time by feeding concrete lessons back into their own documentation. This works on **two tiers**.
 
-**Tier-1 — between-steps improvement.** When `step-executor` finishes an iteration and realizes the iteration as written was flawed in a way that blocks the *next* step — missing a step, ambiguous success criterion, unstated precondition — it emits a structured improvement brief in its final report, describing (a) what was wrong, (b) what the correct knowledge is, and (c) the specific edits to apply. The `pipeline-manager` (depth 1 — dispatching the improver is a *between-steps, chain-orchestration* spawn, which is the manager's job, not the step-executor's) picks up the brief and dispatches `pipeline-improver` synchronously before spawning the next step-executor. The improver makes minimal, surgical edits to the iteration file (or `PIPELINE.md` for pipeline-wide invariants) and reports back; the manager then continues the chain so the next step-executor reads the updated files from disk. The next time anyone runs this pipeline, the improved iteration is smoother.
+**Tier 1 — between steps.** A `step-executor` that finishes and realises the step
+*as written* would block the next one — a missing stage, an ambiguous success
+criterion, an unstated precondition — emits a structured brief: what was wrong,
+what the correct knowledge is, and the exact edits to apply.
 
-**Tier-2 — end-of-run retrospective.** Tier-1 only carries the single most-blocking flaw per step. To capture everything else, each `step-executor` *also* journals every problem it hits — doc flaws, ambiguities, script-extraction candidates, but also real project bugs, environment issues, and general friction — as individual files in a gitignored `<pipeline-root>/.feedback/<run_id>/` folder, written as it goes (so they survive a crash). After the whole run finishes (completes or halts), the `pipeline-manager` runs a retrospective: it splits the problems into **doc-actionable** (doc-flaw / ambiguity / script-candidate) and **human-only** (project-issue / env / friction). The doc-actionable ones go to a single Opus `pipeline-improver` batch pass that consolidates, dedups, and applies the doc fixes (reading current state first so it never re-does a fix Tier-1 already landed) and emits a list of confirmed script extractions for `pipeline-script-creator`. The human-only ones are summarized straight to you in the run's final report — the pipeline never tries to auto-fix your code or your machine. The feedback folder is deleted afterward; the doc improvements live in the iteration files, and the human-only summary lives in the report.
+The `pipeline-manager` picks it up and dispatches `pipeline-improver`
+synchronously, before the next step spawns. (Depth 1: dispatching the improver is
+between-steps chain orchestration, which is the manager's job, not a step's.) The
+improver makes minimal surgical edits to the step file — or `PIPELINE.md` for a
+pipeline-wide invariant — and the chain continues, so the next step reads the
+corrected file from disk.
+
+**Tier 2 — end-of-run retrospective.** Tier 1 carries only the single most
+blocking flaw per step. Everything else is journalled as it happens into a
+gitignored `<pipeline-root>/.feedback/<run_id>/`, one file per problem, written
+immediately so it survives a crash.
+
+When the run ends — completed or halted — the manager sorts what it collected:
+
+| Bucket | Contains | Goes to |
+|---|---|---|
+| **Doc-actionable** | doc flaws, ambiguities, script-extraction candidates | One Opus `pipeline-improver` batch pass that consolidates, dedups, and applies the fixes — reading current state first, so it never re-does what Tier 1 already landed — then hands confirmed extractions to `pipeline-script-creator`. |
+| **Human-only** | real project bugs, environment issues, general friction | Straight to you, summarised in the run's final report. |
+
+The pipeline never tries to auto-fix your code or your machine. The feedback
+folder is deleted afterwards: doc improvements live in the step files, and the
+human-only summary lives in the report.
 
 Boundaries:
 
@@ -493,7 +556,15 @@ You can also invoke `pipeline-script-creator` directly via the `Agent` tool when
 
 ## Script steps (zero-token steps)
 
-Script extraction (above) removes the *heavy procedural block* from an agent iteration — the agent still reads the script's result and decides what to do next. When a **whole** iteration is deterministic — a build gate, a CI wait, a fixed file/API sequence with no judgment at all — you can go one rung further and make the step itself the program, with **no agent involved**. Add `type: script` to the iteration's frontmatter and the `pipeline next` engine runs it **in-process, for zero LLM tokens** (the same mechanism that runs external-isolation worktree hooks). A fully deterministic iteration that used to cost a ~10–20k-token step-executor spawn now costs nothing.
+Script extraction (above) takes the *heavy procedural block* out of an agent
+step — the agent still reads the result and decides what happens next. When the
+**whole** step is deterministic (a build gate, a CI wait, a fixed file or API
+sequence with no judgement in it), go one rung further and make the step itself
+the program.
+
+Set `type: script` and the `pipeline next` engine runs it **in-process, for zero
+LLM tokens** — the same mechanism that runs `isolation: run` worktree hooks. A
+step that used to cost a ~10–20k-token executor spawn now costs nothing.
 
 The three-rung extraction ladder:
 
@@ -533,7 +604,12 @@ Test a script step in isolation before wiring it into a chain — no run require
 pipeline step run ./.pipeline/release-api/steps/03-wait-ci.md --param pr_number=132 --json
 ```
 
-The full contract — the manifest keys, the `params:` / `output:` vocabulary and `${…}` bindings, the **frozen** process I/O contract (env vars, params file, stdin/stdout, exit semantics, the `ok:false` rule), the failure classes + `retries` / `on-failure` agent fallback, the timeout/call-budget ladder, the attempt ledger (idempotency), the outputs store, and secrets handling — is in **[`docs/script-steps.md`](docs/script-steps.md)**.
+The full contract lives in **[`docs/script-steps.md`](docs/script-steps.md)**:
+manifest keys, the `params:` / `output:` vocabulary and `${…}` bindings, the
+**frozen** process I/O contract (env vars, params file, stdin/stdout, exit
+semantics, the `ok:false` rule), failure classes with `retries` / `on_failure`
+agent fallback, the timeout and call-budget ladder, the attempt ledger that makes
+retries idempotent, the outputs store, and secrets handling.
 
 ## Waiting on GitHub CI without burning tokens (`pipeline ci-wait`)
 
@@ -600,15 +676,43 @@ serve as the before/after evidence for whether each optimization helped.
 
 ## Nested-blocker delegation
 
-Sometimes an iteration runs into a problem whose fix is clearly **outside the current task's scope** AND blocks further progress — a broken tool in a different module the task depends on, a missing upstream API, a regression in `main` that would need to land before this task can compile. For those cases the plugin splits the work between the executor (subagent, limited to preparing a brief) and `/pipeline:run` (main session, does the spawning and waiting — because a subagent cannot wait hours for a PR to merge or hold a long poll/merge loop across its finite context):
+Sometimes a step hits a problem whose fix is clearly **outside the current
+task's scope** and blocks all further progress — a broken tool in a module this
+task depends on, a missing upstream API, a regression in `main` that has to land
+before this can even compile.
+
+The work is split across two depths, and the reason is structural: a subagent
+cannot wait hours for a PR to merge, or hold a poll-and-merge loop across a
+finite context.
+
+| Who | Does |
+|---|---|
+| `step-executor` *(subagent)* | Recognises the blocker and prepares a brief. Nothing else. |
+| `/pipeline:run` *(main session)* | Files the issue, spawns the child run, and does the waiting. |
 
 1. The executor stabilizes the parent branch (commits what's done, or reverts the unfinished chunk so the branch is green) and picks the blocker's target repo and base branch.
 2. The executor emits a `blocker_delegation` brief in its final report with a full issue body, the child pipeline's first iteration path, a `partial_work_note` for resumption, and poll/deadline settings.
-3. The `pipeline-manager` relays the brief up to `/pipeline:run`, which files a **new GitHub issue** on the blocker's target repo, posts a back-link on the parent's issue so the relationship is visible from both sides, and spawns a **child pipeline run** (a `pipeline-manager`) via the `Agent` tool. The child's worktree defaults to `main` of the blocker's target repo; the parent's branch is used as the base only when `main` lacks state that's strictly prerequisite for even starting the fix.
+3. The `pipeline-manager` relays the brief up to `/pipeline:run`, which files a
+   **new GitHub issue** on the blocker's target repo, posts a back-link on the
+   parent's issue so the relationship is visible from both sides, and spawns a
+   **child run** via the `Agent` tool. The child's worktree defaults to `main` of
+   the target repo; the parent's branch is used as the base only when `main`
+   lacks state that is strictly prerequisite to starting the fix.
 4. `/pipeline:run` **waits** — polling for the child PR to merge (default interval 5 minutes, default deadline 4 hours) — instead of advancing the chain.
 5. On merge, `/pipeline:run` fetches the blocker target's updated base, merges (or rebases) it into the parent's branch, re-runs the iteration's verification gate, and re-invokes the `pipeline-manager` to re-enter the original iteration with the `partial_work_note` embedded in the prompt.
 
-Closed-without-merging, merge conflicts, a red verification gate, or a deadline hit all halt the chain for human review rather than auto-retrying. The executor-side protocol (heuristics for in-scope vs tangent vs blocker, brief shape, executor invariants) lives in `step-executor`'s system prompt under "Nested-Blocker Delegation"; the caller-side flow (issue creation, child spawn, poll-wait, merge, re-invocation) lives in `/pipeline:run`'s skill under "Nested-Blocker Flow". If you edit one side, edit the other in lockstep.
+Closed without merging, merge conflicts, a red verification gate, or a hit
+deadline all **halt the chain for human review** rather than auto-retrying.
+
+The protocol is deliberately split across two files, and they have to move
+together:
+
+| Side | Covers | Lives in |
+|---|---|---|
+| Executor | in-scope vs tangent vs blocker heuristics, brief shape, executor invariants | `step-executor`'s prompt, "Nested-Blocker Delegation" |
+| Caller | issue creation, child spawn, poll-wait, merge, re-invocation | `/pipeline:run`'s skill, "Nested-Blocker Flow" |
+
+If you edit one side, edit the other in lockstep.
 
 ## Nesting
 
@@ -635,28 +739,106 @@ steps:
 
 ## Parallel / DAG pipelines (opt-in)
 
-By default a pipeline is a **linear chain** — iterations run one after another, in order. That is the right shape for almost everything and it is what you get unless you explicitly opt in. Nothing about sequential pipelines changed.
+Two fields turn concurrency on, and **both are required** — `needs:` alone stays
+sequential:
 
-When a pipeline has **genuinely independent branches** — steps that touch disjoint files and have no ordering dependency on each other — you can let them run **concurrently**. Two optional fields turn it on:
+```yaml
+execution: parallel          # pipeline-level: may independent steps overlap?
 
-- In the manifest: `execution: parallel`.
-- On each independent step: `needs: [<step-name>, ...]` to declare exactly which steps must finish first.
+steps:
+  - name: build
+  - name: lint       {needs: [build]}
+  - name: typecheck  {needs: [build]}
+  - name: test       {needs: [build]}
+  - name: package    {needs: [lint, typecheck, test]}
+```
 
-A pipeline runs in DAG mode **only when `execution: parallel` is set** — `needs:` by itself is not enough. The graph is DATA: `needs:` always means what it says, and `execution:` decides only how much of it may run at once. So whenever you add `needss-on`, also set `execution: parallel`. Otherwise it stays sequential. In DAG mode the `pipeline-manager` runs each ready set of steps concurrently, **each in its own throwaway git worktree** (under `.claude/worktrees/`), then merges the finished branches back into your working branch one at a time. Because the steps are supposed to be independent, those merges should never conflict — if two parallel steps DID edit the same file, the merge conflicts and the whole run halts with a clear message (that means the pipeline was mis-designed; make those steps sequential or split the shared file out).
+`needs:` is data and always means what it says; `execution:` decides only how
+much of the graph may run at once. Keep it sequential when in doubt —
+parallelism is an optimisation for genuinely independent work, not a default.
 
-**Bringing your own isolation (`isolation: none`).** The per-step git worktree above isolates files but NOT environment/ports. If your pipeline already manages its own isolation — e.g. each step creates its own worktree and customises an env file so concurrent servers/ports don't overlap — set `isolation: manual` in `PIPELINE.md` frontmatter (default is `worktree`). In `manual` mode the manager spawns the parallel steps **in place** and does not create or merge any worktree of its own — your pipeline owns isolation end-to-end. Use it only when you genuinely run your own per-branch worktree/port scheme; otherwise leave the default.
+In DAG mode the manager runs each ready set concurrently and merges the finished
+branches back one at a time. Independent steps should never conflict; if two of
+them did edit the same file, the merge conflicts and the run halts. That means
+the pipeline was mis-designed — make those steps sequential, or split the shared
+file out.
 
-Example: a `build` step, then `lint` / `typecheck` / `test` of disjoint modules running in parallel (each `needs: [build]`), then a `package` step that `depends-on: [lint, typecheck, test]`. Ask the designer to make independent branches parallel, or add the frontmatter by hand — it's just YAML.
+### `isolation:` — one axis, three values
 
-Keep it sequential when in doubt; parallelism is an optimization for independent work, not a default.
+Isolation is **scope, and nothing else**.
 
-- **`isolation: run` (run-level, sequential-only) — bring a consumer-provisioned worktree.** For *sequential* pipelines whose steps need project-specific provisioning the git-only worktree can't supply (allocated ports, dev secrets, a rendered `.env`, submodule worktrees), set `isolation: external` in `PIPELINE.md` frontmatter. The plugin then provisions ONE worktree per run: the bundled `pipeline next` CLI executes your convention-path hook scripts at `<project>/.pipeline/.hooks/worktree-{create,destroy}` itself, in-process (deterministic subprocess work — no agent involvement) — once at run start (before the first step), shared by every step, and torn down once on every terminal outcome (including halt). The hook contract is unchanged and frozen: inputs arrive as `PIPELINE_WT_*` environment variables, the create hook prints one JSON object (`worktree_path`/`branch`/`env_file`/`ports`) on stdout and is idempotent per name, the destroy hook prints `{"ok":true}` or soft-fails with `{"ok":false,"detail":"…"}` — existing hooks work unmodified. Your steps just `cd` into the provisioned worktree and source its env file; they don't re-allocate anything. Declare the submodules to include via `submodules: [a, b, c]`. If the hooks are missing the run halts (it never silently runs in-place). Combining `isolation: external` with `execution: parallel` degrades to `isolation: manual` with a warning — `external` is sequential-only.
+| Value | What you get | Use when |
+|---|---|---|
+| `none` | No worktree. Steps run in place. | Sequential pipelines that touch only their own outputs — the default, and right for most. |
+| `step` | One throwaway git worktree per step, under `.claude/worktrees/`, merged back on success. | `execution: parallel`, where concurrent steps must not see each other's files. |
+| `run` | One worktree for the whole run, provisioned by your own hooks. Sequential only. | Steps need what git alone cannot give: allocated ports, a rendered `.env`, dev secrets, submodule worktrees. |
 
-  **Optional mandatory `finalize` stage.** For a run that must not be considered "done" until some project-defined terminal action has SUCCEEDED, add a `worktree-finalize` hook (its presence opts you in; or set `finalize: true` in `PIPELINE.md`). The CLI runs it once at the very end of a COMPLETED run — after the last step, before teardown — and it **must return `{"ok":true}` or the whole run HALTS with the worktree preserved** (so nothing is reaped). It is entirely GENERIC: the plugin has zero knowledge of what your finalize hook does (commit something, push, publish — anything); it only requires `ok`. The hook runs with `PIPELINE_WT_ACTION=finalize` plus the same `PIPELINE_WT_*` context as create/destroy. A pipeline that ships no finalize hook (and no `finalize: true`) is byte-for-byte unchanged — the stage never fires.
+> **v1's `worktree`, `manual` and `external` are gone.** They named three
+> different axes — mechanism, ownership, provenance — and two were inert in
+> sequential mode. An unknown value is now a hard **error**, not a warning with a
+> fallback: `isolation: manager` once ran for months with no isolation at all,
+> and that is the failure this refusal exists to prevent.
 
-  **Worktree-scoped pipeline I/O (default).** An external-isolation run reads its pipeline definition from — and self-improves into — the run WORKTREE's pipeline copy: the CLI provisions at run init and plans from `<worktree>/<pipeline-root-rel>`, so a branch that modifies its own pipeline runs its own version, and improver/script-creator/retrospective edits ride your finalize commit/PR instead of dirtying the main checkout. Only **committed** state reaches the run (a worktree materializes commits; the CLI warns when the main pipeline dir is dirty). Run bookkeeping (`next.json`, events, `.stats`) stays under the main checkout, and `.gitignore` stubs inside the worktree keep run artifacts out of your finalize commit. Set `PIPELINE_WORKTREE_SCOPED=0` to restore the legacy main-scoped reads; the flag is frozen per run at init.
+### `isolation: run` — the hook contract
 
-- **`pipeline submodule bump` — a guarded submodule-pointer bump (a git primitive your finalize hook can call).** When a run advances a git *submodule* and you need the SUPERPROJECT's pointer recorded on its base branch, do NOT hand-roll `git` for it — call the CLI command instead: `pipeline submodule bump --project-root <superproject> [--submodules a,b] [--base <branch>] [--source-worktree <path>] [--dry-run] [--json]`. It records the pointer change(s) and pushes them **isolation-safely** — the shared checkout is never `checkout`/`reset`/`switch`ed (its only mutation is `fetch` + `merge --ff-only`); all branch/commit work happens in a throwaway worktree off `origin/<base>`. Built-in guards make the dangerous mistakes *impossible*: it refuses to land a pointer that differs only because the base advanced past the run's fork (no accidental reverts), skips a pointer the base changed since the fork (no clobbering a concurrent bump), only bumps to a commit reachable from the submodule's `origin/<default>`, self-cleans orphaned throwaway worktrees from prior killed runs before it starts (idempotent), and STOPs on any error with a structured `halt_reason` + the exact manual recovery. It auto-detects drifted pointers from `.gitmodules` when `--submodules` is omitted, and a project with no submodules is a no-op. Output is one JSON object (`{status, bumped[], skipped[], pr, infra_sha, …}`); exit `0`/`1`/`2`. Needs `git` + `gh` on PATH.
+The CLI executes your convention-path hooks itself, in-process, with no agent
+involved:
+
+| Hook | When | Must print |
+|---|---|---|
+| `.pipeline/.hooks/worktree-create` | Once at run start, before the first step | One JSON object: `worktree_path`, `branch`, `env_file`, `ports`. Idempotent per name. |
+| `.pipeline/.hooks/worktree-finalize` | Once after the last step of a **completed** run, before teardown | `{"ok":true}` — or the run **halts with the worktree preserved**. Optional; its presence opts you in (or set `finalize: true`). |
+| `.pipeline/.hooks/worktree-destroy` | Once on every terminal outcome, including halt | `{"ok":true}`, or soft-fail with `{"ok":false,"detail":"…"}`. |
+
+Inputs arrive as `PIPELINE_WT_*` environment variables; finalize additionally
+gets `PIPELINE_WT_ACTION=finalize`. Steps `cd` into the provisioned worktree and
+source its env file — they never re-allocate anything. Declare which submodules
+to include with `submodules: [a, b, c]`.
+
+Three behaviours worth knowing before you rely on it:
+
+- **Missing hooks halt the run.** It never silently falls back to running in
+  place.
+- **`isolation: run` + `execution: parallel`** degrades to `step` with a
+  warning. Run-scoped isolation is sequential-only.
+- **The finalize stage is generic.** The plugin has no idea what your hook does
+  — commit, push, publish, anything. It only requires `ok`.
+
+**Worktree-scoped I/O (default).** A run with `isolation: run` reads its pipeline
+definition from — and self-improves into — the *worktree's* copy. So a branch
+that modifies its own pipeline runs its own version, and improver edits ride your
+finalize commit instead of dirtying the main checkout. Only **committed** state
+reaches the run, and the CLI warns when the main pipeline directory is dirty. Run
+bookkeeping (`next.json`, events, `.stats`) stays under the main checkout.
+`PIPELINE_WORKTREE_SCOPED=0` restores the legacy main-scoped reads; the flag is
+frozen per run at init.
+
+### `pipeline submodule bump`
+
+When a run advances a git submodule and the superproject's pointer has to be
+recorded on its base branch, call this rather than hand-rolling `git`:
+
+```bash
+pipeline submodule bump --project-root <superproject>   [--submodules a,b] [--base <branch>] [--source-worktree <path>] [--dry-run] [--json]
+```
+
+The shared checkout is never `checkout`/`reset`/`switch`ed — its only mutation is
+`fetch` + `merge --ff-only`; all branch work happens in a throwaway worktree off
+`origin/<base>`. The guards make the dangerous mistakes impossible:
+
+- refuses a pointer that differs only because the base advanced past the run's
+  fork — **no accidental reverts**;
+- skips a pointer the base changed since the fork — **no clobbering a concurrent
+  bump**;
+- only bumps to a commit reachable from the submodule's `origin/<default>`;
+- self-cleans orphaned worktrees from prior killed runs before starting;
+- stops on any error with a structured `halt_reason` and the exact manual
+  recovery.
+
+Pointers drifted from `.gitmodules` are auto-detected when `--submodules` is
+omitted, and a project with no submodules is a no-op. Output is one JSON object
+(`{status, bumped[], skipped[], pr, infra_sha, …}`); exit `0`/`1`/`2`. Needs
+`git` and `gh` on `PATH`.
 
 ## Configuration reference
 
@@ -720,7 +902,7 @@ edge may be taken per run. Always end a conditional node with a default edge.
 
 Cleanup is part of the run contract, and it is outcome-aware:
 
-- **Parallel / DAG runs** (`isolation: worktree`): after each clean merge the runtime deletes the merged branch (`git branch -d`) and removes its worktree (retrying with `--force` when build artifacts block it). A COMPLETED parallel run leaves zero `worktree-*` branches and zero entries under `.claude/worktrees/`.
+- **Parallel / DAG runs** (`isolation: step`): after each clean merge the runtime deletes the merged branch (`git branch -d`) and removes its worktree (retrying with `--force` when build artifacts block it). A COMPLETED parallel run leaves zero `worktree-*` branches and zero entries under `.claude/worktrees/`.
 - **External-isolation runs**: on a COMPLETED run the destroy hook is invoked with `PIPELINE_WT_DELETE_BRANCHES=1` so the run branch dies with the worktree (opt out via `delete_branches: false`). On `halted` / `depth-exhausted` the worktree AND branch are deliberately preserved for post-mortem and resume — that is not a leak, it is evidence.
 - **Failure paths are surfaced, never silent**: a merge conflict or mid-layer halt enumerates every not-yet-merged branch + worktree path in the halt detail.
 
@@ -733,7 +915,14 @@ pipeline gc --clean    # prune + remove merged-only worktrees + safe-delete (-d)
 
 **Submodules are scanned too** (skip with `--no-submodules`): external-isolation runs provision worktrees in every declared submodule, so historically each run leaked one `worktree-*` branch into EACH submodule repo. `gc` reports them per submodule against each repo's own default branch, and `--clean` applies the same safe rules inside every submodule.
 
-`--clean` is conservative by design: it never force-deletes a branch, never touches unmerged work or the current checkout, and lists everything it kept and why. One documented exception exists for the machine-owned namespace: `--clean --force-worktree-branches` force-deletes (`-D`) UNMERGED `worktree-*` branches — needed because squash-merged run branches read as "unmerged" to git forever. It never touches branches outside that pattern.
+`--clean` is conservative by design: it never force-deletes a branch, never
+touches unmerged work or the current checkout, and lists everything it kept and
+why.
+
+One documented exception, scoped to the machine-owned namespace:
+`--clean --force-worktree-branches` force-deletes (`-D`) **unmerged** `worktree-*`
+branches. It is needed because a squash-merged run branch reads as "unmerged" to
+git forever. It never touches a branch outside that pattern.
 
 ## Where things live
 
@@ -813,7 +1002,19 @@ While it is **unset** (the default), or set to any non-falsy value, the system i
 - the `SessionStart` hook writes `session.opened`,
 - the analytics hooks (`PreToolUse`/`PostToolUse`/`SubagentStop`/`Stop`) emit events and mirror bindings (the `Notification` hook is separate — it keeps its own `PIPELINE_AWAITING_INPUT_ENABLED` switch and still reports a blocked run when the rest is opted out).
 
-When you opt out (`0`/`false`/`no`/`off`): the `SessionStart` hook does not write `session.opened`, and the analytics hooks emit nothing and do no filesystem work. Either way your pipelines run identically — the variable only controls the observability layer. You can also set it in your shell or OS environment before launching Claude Code. Because the hook *registrations* live in the plugin, Claude Code still launches each hook's (instantly-exiting) process even when opted out; to remove even that, disable the plugin. Your core run lifecycle is always journaled by `/pipeline:run`, so `pipeline logs` works as a lightweight terminal view regardless of this setting.
+Opted out (`0`/`false`/`no`/`off`), the `SessionStart` hook does not write
+`session.opened` and the analytics hooks emit nothing and touch no files. Your
+pipelines run identically either way — the variable controls the observability
+layer and nothing else. It can also be set in your shell or OS environment
+before launching Claude Code.
+
+Two things it does *not* do:
+
+- **It does not unregister the hooks.** Those registrations live in the plugin,
+  so Claude Code still launches each hook's instantly-exiting process. To remove
+  even that, disable the plugin.
+- **It does not silence `pipeline logs`.** The core run lifecycle is journalled
+  by `/pipeline:run` regardless, so the terminal view keeps working.
 
 > Performance note: `SubagentStop` only fires the hook for the `pipeline-manager` subagent (via a `matcher`), so the dozens of other subagent stops in a run no longer spawn a hook process.
 
@@ -841,7 +1042,16 @@ This switch is **orthogonal** to `PIPELINE_STATS_ENABLED` — the separate local
 
 ### Prompt match hook (opt-in) — `PIPELINE_PROMPT_MATCH_ENABLED`
 
-The plugin also ships a `UserPromptSubmit` hook that surfaces a matching pipeline for whatever you just typed — deterministic auto-discovery with **zero always-loaded context**. It runs the same BM25 matcher `/pipeline:find` and `/pipeline:dispatch` use against your prompt, and **only on a confident single match** (exactly one candidate, or the top score at least 2× the runner-up — the same ambiguity threshold `/pipeline:dispatch` uses) injects one line of context suggesting `/pipeline:run <first-iteration>` or `/pipeline:dispatch`. On no match or an ambiguous match it stays completely silent; it never blocks or modifies your prompt.
+The plugin also ships a `UserPromptSubmit` hook that surfaces a matching
+pipeline for whatever you just typed — deterministic auto-discovery with **zero
+always-loaded context**. It runs the same BM25 matcher as `/pipeline:find` and
+`/pipeline:dispatch` against your prompt.
+
+It speaks **only on a confident single match** — exactly one candidate, or a top
+score at least 2× the runner-up, the same threshold `/pipeline:dispatch` uses —
+and then injects one line suggesting `/pipeline:run` or `/pipeline:dispatch`. On
+no match or an ambiguous one it stays completely silent. It never blocks or
+modifies your prompt.
 
 Unlike the journal/analytics system (on by default), this hook is **OFF BY DEFAULT** and gated by its own environment variable (same non-falsy value parsing as `PIPELINE_JOURNAL_ENABLED`, but its own opt-in default):
 
@@ -871,7 +1081,7 @@ Everything the plugin reads from the environment, in one place. Set the per-proj
 | `PIPELINE_MACHINE_TOKEN` | unset | The no-human path for `pipeline cloud connect` (bots, CI, autonomous agents): an `aip_m_<client-id>.<secret>` machine credential from your dashboard's Settings → Machine credentials. Its presence suppresses every prompt and browser/device-code attempt — pass `--org <slug>` too (a machine credential has no discoverable org). `--machine-token <token>` is the flag equivalent; the env var is preferred since argv is world-readable in `ps`. Combining either with `--device` is a usage error (exit 2). |
 | `PIPELINE_DRIVE_EXECUTOR_CMD` | `claude -p --agent pipeline:step-executor --model {model} --effort {effort} --permission-mode {permissions} --session-id {session} --add-dir {record_dir} --plugin-dir {plugin_dir} --output-format stream-json --verbose --json-schema {schema}` | Overrides the command template the EXPERIMENTAL headless runner (`pipeline drive`) spawns per step. Whitespace-split; tokens `{model}` / `{effort}` / `{permissions}` / `{session}` / `{record_dir}` / `{plugin_dir}` / `{schema}` are substituted (a flag+token pair is dropped when the token has no value; on an answer/crash resume the flag before `{session}` becomes `--resume`); the step prompt always arrives on stdin. `{plugin_dir}` (CLAUDE_PLUGIN_ROOT) keeps `--agent pipeline:step-executor` resolvable once `-p` defaults to `--bare`; unlike `{session}`/`{record_dir}` it is never appended to a template that omits it, so a pre-existing override is unaffected. Equivalent to `--executor-cmd`. |
 | `PIPELINE_HOOK_TIMEOUT_MS` | per-hook (600 000 create/finalize, 300 000 destroy) | Overrides the external-isolation worktree-hook timeout (positive integer, milliseconds). Mostly useful for testing hooks. |
-| `PIPELINE_WORKTREE_SCOPED` | on | Worktree-scoped pipeline I/O for `isolation: external` runs (the run plans from, and self-improves into, the run worktree's pipeline copy — committed state only). `0`/`false` restores the legacy main-scoped reads. FROZEN per run into `next.json` at init — a mid-run flip never mixes path models within one run. |
+| `PIPELINE_WORKTREE_SCOPED` | on | Worktree-scoped pipeline I/O for `isolation: run` runs (the run plans from, and self-improves into, the run worktree's pipeline copy — committed state only). `0`/`false` restores the legacy main-scoped reads. FROZEN per run into `next.json` at init — a mid-run flip never mixes path models within one run. |
 | `PIPELINE_GIT_BIN` / `PIPELINE_GH_BIN` | `git` / `gh` from PATH | Override which `git`/`gh` binaries the CLI's guarded git operations (`pipeline submodule bump`) invoke. |
 | `PIPELINE_JOURNAL_DEBUG` / `PIPELINE_RELAY_DEBUG` | off | `=1` prints diagnostic detail to stderr from the event writer / relay hooks. Debugging only. |
 
@@ -881,7 +1091,19 @@ Everything the plugin reads from the environment, in one place. Set the per-proj
 
 ## Departments (`/mcp` + background notifier)
 
-Separate from pipelines: a **department** is an agent somebody else runs, on somebody else's machine, that yours can hand work to. It has a name, a description and a list of skills; you don't install or clone it — you ask for it by name and [ai-pipeline.dev](https://ai-pipeline.dev) routes the task to whoever is serving it. This plugin is the client side of that, in three pieces: a **remote MCP server entry** so Claude Code can call departments inside a live session, a **background notifier** so a delegated task doesn't get lost if you close that session before it finishes, and the `pipeline department …` commands that publish a folder of your own as a department other people can call.
+Separate from pipelines: a **department** is an agent somebody else runs, on
+somebody else's machine, that yours can hand work to. It has a name, a
+description and a list of skills. You don't install or clone it — you ask for it
+by name, and [ai-pipeline.dev](https://ai-pipeline.dev) routes the task to
+whoever is serving it.
+
+This plugin is the client side of that, in three pieces:
+
+| Piece | For |
+|---|---|
+| A remote **MCP server entry** | Calling departments from inside a live Claude Code session. |
+| A **background notifier** | So a delegated task isn't lost when you close that session before it finishes. |
+| `pipeline department …` | Publishing a folder of your own as a department other people can call. |
 
 **The walkthroughs live on ai-pipeline.dev** — five pages, in order, every command on them pasted from a terminal where it ran. This section is the plugin-side reference and deliberately does not repeat them:
 
@@ -908,7 +1130,15 @@ That's it, once per machine. Claude Code holds an audience-bound, scope-limited,
 
 Once connected, delegating work is one line in natural language — "have the Unity department review the save system" — and the agent calls the departments' tools (`departments.list`, `tasks.send`, `tasks.wait`, …) on your behalf. A clarifying question along the way costs exactly one extra turn (you answer it like any other question); the result and any artifacts land back in your session.
 
-> **One-time re-consent when you update to this version.** The MCP server key is `ai-pipeline-departments`; it was `ai-pipeline-mesh` before the terminology rename. That key is embedded in every tool's callable name (`mcp__plugin_<plugin>_<server>__<tool>`) and stored OAuth grants are keyed by it, so to Claude Code the renamed entry is a *new* server with no grant: run `/mcp` and approve once more. Nothing else about the connection changes. If you carry the old name in a `permissions.allow` entry, a skill's `allowed-tools`, a subagent's `tools` list or a hook matcher, update it too.
+> **One-time re-consent when you update to this version.** The MCP server key is
+> `ai-pipeline-departments`; before the terminology rename it was
+> `ai-pipeline-mesh`. That key is embedded in every tool's callable name
+> (`mcp__plugin_<plugin>_<server>__<tool>`) and stored OAuth grants are keyed by
+> it — so to Claude Code the renamed entry is a *new* server with no grant. Run
+> `/mcp` and approve once more; nothing else about the connection changes.
+>
+> If you carry the old name in a `permissions.allow` entry, a skill's
+> `allowed-tools`, a subagent's `tools` list, or a hook matcher, update those too.
 
 ### Publishing one of your own — the `pipeline department` commands
 
@@ -926,7 +1156,18 @@ A department is a folder whose only required file is `department.yml`. [Build a 
 Two things worth knowing before you author one:
 
 - **`serve` reports only what it observed.** It prints `online` when the control plane says so, `registered — not serving` with the reason and the fix when this machine has no live supervisor, and `could not confirm it is live` when neither could be read. It does not assert success it hasn't checked.
-- **The declared engine has to be one `pipeline-runner` actually ships a module for.** The scaffold's default is `claude-code`; when no module exists for the declared engine, `serve` refuses and registers nothing rather than publishing a department that could not execute a single task, and `validate`'s engine-support line tells you the same thing before you get there — one predicate behind both, so they cannot disagree. [Build a department](https://ai-pipeline.dev/docs/build-a-department) walks `engine: pipeline`, which turns a pipeline you already have into something your org can call, and states the current limit in the CLI's own words. Nothing about the file changes when a missing module ships: set `runtime.engine` and re-run `serve`.
+- **The declared engine has to be one `pipeline-runner` actually ships a module
+  for.** The scaffold defaults to `claude-code`. When no module exists for the
+  declared engine, `serve` refuses and registers nothing rather than publishing a
+  department that could not execute a single task — and `validate`'s
+  engine-support line says the same thing before you get that far. One predicate
+  sits behind both, so they cannot disagree.
+
+  [Build a department](https://ai-pipeline.dev/docs/build-a-department) walks
+  `engine: pipeline`, which turns a pipeline you already have into something your
+  org can call, and states the current limit in the CLI's own words. Nothing
+  about the file changes when a missing module ships: set `runtime.engine` and
+  re-run `serve`.
 
 ### The background notifier — a parked task announces itself
 
@@ -950,7 +1191,12 @@ pipeline department notify --once --json
 
 Opt out with `PIPELINE_DEPARTMENT_NOTIFY_ENABLED=0` (same falsy-value convention as `PIPELINE_JOURNAL_ENABLED`) if you never want the daemon spawned or the queue drained. (`pipeline mesh notify` and `PIPELINE_MESH_NOTIFY_ENABLED` still work as deprecated, warning aliases for anyone with an existing service definition or shell profile.)
 
-> **Implementation note for the curious:** the notifier polls the departments' REST task surface using the same credential `pipeline cloud connect` stores, rather than the `/mcp` tool surface Claude Code itself uses — a headless background process has no browser session to complete an OAuth consent flow in, so it reuses the credential that's already there. See the header comment in `apps/pipeline-cli/src/lib/department-notify.ts` for the full reasoning.
+> **Implementation note for the curious.** The notifier polls the departments'
+> REST task surface with the credential `pipeline cloud connect` already stored,
+> rather than the `/mcp` tool surface Claude Code itself uses. A headless
+> background process has no browser session to complete an OAuth consent flow in,
+> so it reuses what is already there. Full reasoning is in the header comment of
+> `apps/pipeline-cli/src/lib/department-notify.ts`.
 
 ## Resuming a halted pipeline
 
