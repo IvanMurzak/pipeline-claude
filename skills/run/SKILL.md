@@ -26,7 +26,17 @@ This skill is a supervisor, not a reader. Every iteration file is read by a `ste
 
 ## Runner selection (experimental)
 
-When the pipeline is v1 and the `PIPELINE.md` frontmatter you read for `model:` also carries `runner: headless` (a v2 manifest has no `runner:` key, so every v2 run is manager-driven), do NOT spawn a `pipeline-manager`. Instead run the bundled headless driver as a background process and supervise it:
+**Resolve `runner:` alongside the `model:` read at Procedure step 3.** In a v2 pipeline it is a top-level key in `pipeline.yml` — `Grep` `^runner:` there, which reads one line and never opens a step file; in v1 it is `PIPELINE.md` frontmatter, already inside the ≤50 lines you read for `model:`. **Absent or unreadable ⇒ `manager`**, today's behaviour and the deliberate default (E10). A value that *is* declared but has no branch below still runs `manager` — but **say so in one line before you start**, because a mode the manifest did not declare is a mode the author did not choose. Never infer the mode from chain length: an invisible threshold makes one command behave two ways.
+
+### `runner: session` — the main session runs the loop itself
+
+Do NOT spawn a `pipeline-manager`. Read [the session loop](references/session-loop.md) and follow it **in place of Procedure steps 5.1–5.3**; everything else in this file — steps 1–4, the Resume Procedure, the Nested-Blocker Flow, the Supervisor invariants and the Report format — applies to you unchanged, because you are still the supervisor at depth 0 and have only absorbed the loop instead of delegating it.
+
+That file carries the two preflight refusals this mode needs (a CLI too old for `pipeline next --brief-file`, and `execution: parallel`, whose payloads live in a brief the session may not open) and is honest about the trade: every action *and every step report* lands in the context the user is watching, so a long chain belongs in `manager` — which is precisely why `manager` is still the default.
+
+### `runner: headless` (v1) — the bundled driver
+
+When the pipeline is v1 and the `PIPELINE.md` frontmatter you read for `model:` also carries `runner: headless`, do NOT spawn a `pipeline-manager`. Instead run the bundled headless driver as a background process and supervise it:
 
 ```bash
 bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" drive \

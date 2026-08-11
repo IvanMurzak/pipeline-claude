@@ -16,6 +16,7 @@ skills/
   design/SKILL.md                   # /pipeline:design   — designs pipelines directly
     references/authoring-protocol.md # complete design contract, read by the skill on invocation
   run/SKILL.md                      # /pipeline:run      — spawns pipeline-manager (which spawns step-executors); chains improver and script-creator after each iteration; emits run lifecycle events into the journal
+    references/session-loop.md      # `runner: session` — the loop the MAIN SESSION runs itself instead of spawning a pipeline-manager, read by the skill only when the manifest selects that mode
   dispatch/SKILL.md                 # /pipeline:dispatch — three-tier ladder (`pipeline match` → disambiguator/Haiku → main-session chain detection); auto-runs chosen pipeline(s)
   find/SKILL.md                     # /pipeline:find     — deterministic-only match (BM25 + Scope.Out hard-filter); accepts --issue; asks before running
   optimize/SKILL.md                 # /pipeline:optimize — USER-INVOKED ONLY (disable-model-invocation): weekly review of .stats/ measurements → targeted pipeline-improver fixes
