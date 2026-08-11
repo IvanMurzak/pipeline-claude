@@ -5,7 +5,7 @@
 [![CLI](https://img.shields.io/npm/v/%40baizor%2Fpipeline?style=for-the-badge&logo=npm&logoColor=white&label=CLI&labelColor=0D1117&color=CB3837)](https://www.npmjs.com/package/@baizor/pipeline)
 [![License](https://img.shields.io/badge/license-MIT-6E7681?style=for-the-badge&labelColor=0D1117)](LICENSE)
 
-![Two commands set Pipeline up and run your first pipeline end to end](docs/pipeline-terminal.svg)
+![A pipeline run walking its steps: plan, implement, test, changelog, open PR, merge](docs/pipeline-flow.svg)
 
 **Long AI work, as ordered files in your repo.** A pipeline is a folder of
 numbered markdown steps. A deterministic CLI decides what runs next — not the
@@ -20,6 +20,8 @@ Two commands. The second one from the project where you want pipelines to live.
 bun add -g @baizor/pipeline
 pipeline init
 ```
+
+![`pipeline init` signs in, connects the project, installs the plugin, clones a starter pipeline and runs it](docs/pipeline-terminal.svg)
 
 `pipeline init` is the whole setup: one browser consent screen, then it connects
 this project to your account, installs this plugin into Claude Code, clones a
@@ -90,9 +92,13 @@ plugin arrive via `/plugin update`; the CLI updates on its own npm version line.
 ## Your first pipeline
 
 ```text
-/pipeline:clone support-answer        # a ready-made pipeline to run and adapt
-/pipeline:run .pipeline/support-answer/01-retrieve.md
+/pipeline:clone support-answer
+/pipeline:run ./.pipeline/support-answer
 ```
+
+`run` takes the pipeline **directory** — the manifest decides which step is
+first, and in what order the rest follow. Add `--resume` to pick a halted run
+back up, or `--start <step-name>` to enter partway in.
 
 Or describe what you want and let it author one:
 
