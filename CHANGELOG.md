@@ -4,6 +4,32 @@ Notable changes to the `pipeline` Claude Code plugin and the `@baizor/pipeline` 
 (they live in one repo and release together; version numbers are independent — see below).
 This file starts here; earlier history is in `git log`.
 
+## plugin 0.95.0 — a pipeline can ask the main session to drive it
+
+New execution mode **`session`**, selected by the manifest's top-level `runner:` key
+(`pipeline.yml`, or v1 `PIPELINE.md` frontmatter). The main Claude Code session calls
+`pipeline next` itself and spawns one `step-executor` per action — **no
+`pipeline-manager` in the run at all.** Fewest moving parts, one fewer model layer, and
+the user watches every step happen in front of them.
+
+The loop lives in `skills/run/references/session-loop.md`, read by `/pipeline:run` only
+when the manifest selects the mode. It uses `pipeline next --brief-file`, so each
+iteration adds a three-key control object — `{action, brief_file, phase}` — to the main
+context instead of an eighteen-member action block; the brief itself is read by the
+subagent the action dispatches to, never by the session.
+
+**`manager` is unchanged and remains the default** when `runner:` is absent. Choose it
+for anything long: `--brief-file` compresses the requests, not the step reports coming
+back, so a long chain still fills the window the user is watching. Two things `session`
+does not do, both stated in the skill and both refused loudly rather than guessed:
+`execution: parallel` pipelines (a layer's steps and a `merge`'s branches live in the
+brief), and per-step `model:` / `effort:` pinning (the caller sets the subagent's model,
+and the resolved value is in the brief it may not open).
+
+Requires a `@baizor/pipeline` new enough to know `pipeline next --brief-file`; the mode
+preflights for it and refuses with the upgrade command rather than silently handing a
+step executor an absent brief path.
+
 ## plugin 0.93.0 — the hooks become CLI subcommands
 
 **BREAKING for the plugin's install requirements: `@baizor/pipeline` must now be installed.**
