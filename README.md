@@ -76,7 +76,7 @@ that step yourself from inside Claude Code:
 
 ```text
 /plugin marketplace add IvanMurzak/pipeline-claude-marketplace
-/plugin install pipeline@pipeline-claude
+/plugin install pipeline@pipeline
 ```
 
 **The global CLI is required, not optional.** Since plugin 0.93.0 the five hook
@@ -131,7 +131,7 @@ of all of it and serves the same dashboard at `http://127.0.0.1:<port>/`.
 
 ## Documentation
 
-- [What you get](#what-you-get) · [Token discipline](#token-discipline-why-the-architecture-looks-the-way-it-does) · [Mental model](#mental-model)
+- [What you get](#what-you-get) · [Token discipline](#token-discipline) · [Mental model](#mental-model)
 - [Using the plugin in a consumer project](#using-the-plugin-in-a-consumer-project) — [cheat sheet](#cheat-sheet--which-command-does-what), [day 1](#day-1--author-and-run-your-first-pipeline), [day 2+](#day-2--picking-the-right-pipeline-for-a-task), [pitfalls](#common-pitfalls)
 - [Iteration file shape](#iteration-file-shape) · [Finding the right pipeline](#finding-the-right-pipeline-for-a-task) · [Self-improving pipelines](#self-improving-pipelines)
 - [Script extraction](#token-cheap-iterations-via-script-extraction) · [Script steps](#script-steps-zero-token-steps) · [`ci-wait`](#waiting-on-github-ci-without-burning-tokens-pipeline-ci-wait)
@@ -145,21 +145,42 @@ and the Codex build of this plugin in [`IvanMurzak/pipeline-codex`](https://gith
 
 ## What you get
 
-- **`/pipeline:design <high-level goal>`** — directly designs an ordered chain of iteration files under `./.pipeline/<pipeline-name>/`. Each file is one PR-sized unit of work.
-- **`/pipeline:clone <template-name>`** — scaffolds a bundled, ready-made pipeline template into `./.pipeline/<template-name>/` so you have a working pipeline to run and adapt without authoring one (or a global `bun add -g @baizor/pipeline`) — it shells the CLI that ships inside the plugin. Run `/pipeline:clone --list` to see the templates (e.g. `support-answer`, `ship-feature`, `example-minimal`); pass `--force` to overwrite an existing target or `--dir <path>` to clone into a different project root.
-- **`/pipeline:run <absolute-path-to-iteration.md>`** — drives the pipeline end-to-end. It mints the run id, owns run liveness, and spawns a single `pipeline-manager` (depth 1) that drives the chain — running a fresh `step-executor` per iteration (depth 2) and dispatching `pipeline-improver` / `pipeline-script-creator` between steps. `/pipeline:run` itself stays in the main session: subagents can now nest (up to 5 levels deep), but the supervisor stays at depth 0 because a subagent's context is finite, it cannot wait hours for an external condition (the nested-blocker poll-wait), and it has no stable pid for liveness tracking.
-- **`/pipeline:dispatch <task>`** — autonomous task-to-pipeline orchestrator. Walks a three-tier cost ladder per call: (1) deterministic BM25 match via the bundled `pipeline match` CLI — free, resolves most tasks; (2) Haiku-based disambiguator agent — cheap, only runs when the top-2 BM25 candidates are within 2× of each other; (3) full-context chain detection in the main session — expensive, only runs when the matcher returns zero candidates AND the task has chain phrasing. Auto-runs the chosen pipeline(s) without confirmation.
-- **`/pipeline:find <task-or-github-issue-url>`** — deterministic, AI-free matcher (the inspection variant of dispatch). Shares dispatch's first-stage matcher (the bundled `pipeline match` CLI) but stops there — no LLM tiers, no auto-run. Returns ranked candidates with score + matched terms plus explicit excluded-with-reason output, then asks before running. Accepts a GitHub issue URL / `owner/repo#NUMBER` / plain issue number — fetches title+body via `gh issue view` and matches against that. Runs with Bun (no `pip install`).
-- **Five subagents** usable via the `Agent` tool: `pipeline-manager`, `step-executor`, `pipeline-improver`, `pipeline-script-creator`, and `pipeline-disambiguator`. Pipeline authoring is the directly invocable `/pipeline:design` skill. Most subagents are normally invoked through automated chains — see "Self-improving pipelines", "Token-cheap iterations via script extraction", and "Finding the right pipeline for a task" below. The disambiguator runs on Haiku 4.5 to keep the matching ladder cheap.
-- **A remote MCP server + background notifier** for [ai-pipeline.dev](https://ai-pipeline.dev) departments — delegate a task to another agent/department straight from Claude Code (`/mcp` connects with a one-time browser OAuth consent, no token to paste) and get notified even after this session ends when that task needs your input or finishes. The bundled CLI also carries `pipeline department new` / `validate` / `serve` / `status` / `stop` / `retire`, which publish a folder of your own as a department other people can call. See "Departments (`/mcp` + background notifier)" below.
+**Five slash commands.**
 
-## Token discipline (why the architecture looks the way it does)
+| Command | What it does |
+|---|---|
+| `/pipeline:clone <template>` | Scaffolds a ready-made pipeline into `./.pipeline/<template>/`. `--list` shows them: `support-answer`, `ship-feature`, `example-minimal`. `--force` overwrites, `--dir` picks another project root. |
+| `/pipeline:design <goal>` | Authors a new pipeline from a high-level goal — a `pipeline.yml` plus the markdown its steps read. Each step is one PR-sized unit of work. |
+| `/pipeline:run <pipeline>` | Drives a pipeline end to end. Fresh context per step, resumable, liveness-tracked. |
+| `/pipeline:dispatch <task>` | Picks the right pipeline for a task and runs it without asking. |
+| `/pipeline:find <task>` | The same matcher with no model and no auto-run: ranked candidates, scores, matched terms, and every exclusion with its reason. Takes a GitHub issue URL, `owner/repo#N`, or a bare issue number. |
 
-Every iteration is read by a fresh-context executor on every run, so tokens spent in iteration markdown are paid **forever**, not just once. The plugin's design follows from that:
+**Five subagents**, normally reached through those chains rather than by hand.
 
-- **Skills read only what their role needs.** `/pipeline:run` is a router and never reads iteration bodies; `/pipeline:design` reads the project and existing pipelines only while authoring or revising a pipeline. `/pipeline:dispatch` reads only manifests (capped at 300 tokens each) because matching requires it.
-- **Iterations stay self-contained but get leaner over time.** Long deterministic `Steps` blocks (build sequences, file-system manipulations, multi-call API chains) are extracted into Python scripts under `<pipeline-root>/scripts/` and replaced with one-line `python scripts/<name>.py` invocations. The executor reads one line of markdown; the script's logic only runs in the Bash tool, never through the language model.
-- **Manifest is metadata, not an iteration.** Capped at 300 tokens, never auto-loaded, opt-in per iteration via an explicit `Context` reference. Adding a new pipeline does not raise the per-iteration baseline cost.
+| Agent | Role |
+|---|---|
+| `pipeline-manager` | Drives one run's chain |
+| `step-executor` | Runs a single step, in its own fresh context |
+| `pipeline-improver` | Feeds what a run learned back into the pipeline's own prose |
+| `pipeline-script-creator` | Extracts deterministic blocks out of markdown into scripts |
+| `pipeline-disambiguator` | Breaks a close match — runs on Haiku to keep the ladder cheap |
+
+**Departments.** A remote MCP server and a background notifier: hand a task to
+another agent or team from inside Claude Code, and hear back when it needs you or
+finishes — even after this session ends.
+[Details below](#departments-mcp--background-notifier).
+
+## Token discipline
+
+Every step is read by a fresh-context executor **on every run**. A token spent in
+step markdown is therefore paid forever, not once — which is why the architecture
+looks the way it does.
+
+| Rule | In practice |
+|---|---|
+| **Skills read only their own role's input** | `/pipeline:run` is a router and never opens a step body. `/pipeline:design` reads the project only while authoring. `/pipeline:dispatch` reads manifests, capped at 300 tokens each, because matching needs them. |
+| **Steps get leaner over time** | Long deterministic blocks — build sequences, filesystem work, multi-call API chains — become scripts under `scripts/`, replaced by a one-line invocation. The executor reads one line; the logic runs in Bash, never through the model. |
+| **The manifest is metadata, not a step** | Capped at 300 tokens, never auto-loaded, opt-in per step via an explicit `Context` reference. Adding a pipeline does not raise anyone else's baseline cost. |
 
 ## Mental model
 
