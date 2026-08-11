@@ -1,0 +1,39 @@
+apps/pipeline-cli/templates/example-minimal/PIPELINE.md
+  s_873b9386b6952f::t_e6d8c141979927 25-26
+apps/pipeline-cli/templates/example-minimal/pipeline.yml
+  s_873b9386b6952f::t_ec0685b534a85d 1-27
+apps/pipeline-cli/templates/ship-feature/pipeline.yml
+  s_873b9386b6952f::t_70c7713c1cd7b9 1-61
+apps/pipeline-cli/templates/ship-feature/steps/ci-wait.md
+  s_873b9386b6952f::t_6574d6897bded3 15-16
+apps/pipeline-cli/templates/ship-feature/steps/review.md
+  s_873b9386b6952f::t_b7734c73fe75bf 18
+apps/pipeline-cli/templates/support-answer/pipeline.yml
+  s_873b9386b6952f::t_c43dfe218d85ec 1-57
+apps/pipeline-cli/templates/support-answer/scripts/bm25_retrieve.ts
+  s_873b9386b6952f::t_792536180925cc 1,21
+apps/pipeline-cli/templates/support-answer/scripts/tests/bm25_retrieve.test.ts
+  s_873b9386b6952f::t_afba33609488a4 151
+apps/pipeline-cli/templates/support-answer/steps/answer.md
+  s_873b9386b6952f::t_80e6d5ed963da8 10-11,21
+apps/pipeline-cli/templates/support-answer/steps/select.md
+  s_873b9386b6952f::t_594bc3dcd59959 10,12,14,24
+docs/pipeline-terminal.svg
+  s_873b9386b6952f::t_1262572a60e29d 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "4027cd4d9b1fc46a08866b9e658a00dec4442ee5",
+  "prompts": {},
+  "sessions": {
+    "s_873b9386b6952f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_873b9386b6952f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
