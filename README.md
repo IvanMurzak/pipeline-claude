@@ -1,42 +1,147 @@
-# pipeline
+# Pipeline - Claude
 
-Repository: [`IvanMurzak/pipeline-claude`](https://github.com/IvanMurzak/pipeline-claude). This is the source for the installable Claude Code plugin `pipeline` — the manifest, six agents, skills, hooks, and the bundled `pipeline` CLI under `apps/`. Looking for the optional remote runner that lets connected compute pick up work dispatched by a pipeline? That lives in the sibling repo [`IvanMurzak/pipeline-runner`](https://github.com/IvanMurzak/pipeline-runner).
+[![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-D97757?style=for-the-badge&logo=anthropic&logoColor=white&labelColor=0D1117)](https://claude.com/claude-code)
+[![Release](https://img.shields.io/github/v/release/IvanMurzak/pipeline-claude?style=for-the-badge&logo=github&logoColor=white&label=release&labelColor=0D1117&color=3FB950)](https://github.com/IvanMurzak/pipeline-claude/releases)
+[![CLI](https://img.shields.io/npm/v/%40baizor%2Fpipeline?style=for-the-badge&logo=npm&logoColor=white&label=CLI&labelColor=0D1117&color=CB3837)](https://www.npmjs.com/package/@baizor/pipeline)
+[![License](https://img.shields.io/badge/license-MIT-6E7681?style=for-the-badge&labelColor=0D1117)](LICENSE)
 
-Claude Code plugin for designing and executing long-chain AI workflows as ordered, self-contained iteration files under the consumer project's `.pipeline/` directory. Ships six coordinated agents — one that designs pipelines, a depth-0 `/pipeline:run` supervisor + a `pipeline-manager` orchestrator + per-step `step-executor`s that run them, one that feeds discovered knowledge back into the pipeline's own docs, one that extracts heavy procedural blocks out of iteration markdown into per-pipeline Python scripts so each fresh-context run pays fewer tokens, and a cheap Haiku disambiguator for matching tasks to pipelines.
+![Two commands set Pipeline up and run your first pipeline end to end](docs/pipeline-terminal.svg)
+
+**Long AI work, as ordered files in your repo.** A pipeline is a folder of
+numbered markdown steps. A deterministic CLI decides what runs next — not the
+model — and every step gets a fresh context, so a chain that takes hours never
+drags a hundred thousand tokens of history behind it.
+
+Two commands. The second one from the project where you want pipelines to live.
 
 ## Install
-
-Two commands — the second one from the project where you want pipelines to live:
 
 ```bash
 bun add -g @baizor/pipeline
 pipeline init
 ```
 
-`pipeline init` is the whole setup. It opens your browser once for a single consent screen, connects this project to your account, installs this plugin into Claude Code for you (it shells out to `claude plugin marketplace add IvanMurzak/pipeline-claude-marketplace` + `claude plugin install pipeline@pipeline-claude`), clones a starter pipeline into `./.pipeline/support-answer`, enrols this machine as a runner, and offers to run that starter pipeline right there — so the install ends with a pipeline that has already run on your machine. Every step is idempotent (a re-run prints a `✓` per already-satisfied step and changes nothing) and independently skippable: `--no-plugin`, `--no-run`, `--no-runner`, plus `--yes` / `--json` for scripted setups, and `pipeline init <template>` to start from a different template (`pipeline clone --list` shows them). If Claude Code was already open when you ran it, restart it — a running session does not pick up a newly installed plugin.
+`pipeline init` is the whole setup: one browser consent screen, then it connects
+this project to your account, installs this plugin into Claude Code, clones a
+starter pipeline into `./.pipeline/support-answer`, enrols this machine as a
+runner that starts on boot, and offers to run that starter pipeline right there.
+The install ends with a pipeline that has already run on your machine.
 
-**It connects to the cloud by default, and that is the only network step.** Nothing about your code or your keys goes with it: the control plane coordinates runs and shows you their status, and by default receives metadata only — statuses, timings, token counts — filtered on your machine before anything is sent. You do not need an account first; if you have none, signing in creates one, and your first organization is created for you. Two escape hatches, and neither is buried in `--help`:
+Restart Claude Code afterwards — a running session does not pick up a newly
+installed plugin.
 
-- **`pipeline init --local`** does everything above except the cloud. No browser, no account, nothing sent to ai-pipeline.dev.
-- A **failed or declined** connect is a warning, not an error. `init` finishes locally and exits 0; `pipeline cloud connect` picks it up later.
+**No account wanted?** `pipeline init --local` does all of the above except the
+cloud. No browser, no account, nothing sent anywhere.
 
-`--server`, `--org` and `--project` are passed through to that connect. Under `--json` no browser is ever opened: set `PIPELINE_MACHINE_TOKEN` to connect non-interactively (CI, bots, agents), or the cloud step is skipped with a stated reason and the rest still runs.
+<details>
+<summary><b>Prerequisites, escape hatches, and installing the plugin by hand</b></summary>
 
-Two prerequisites, and `init` is explicit about both:
+<br>
 
-- **Bun.** The CLI's executable is TypeScript, so Bun is required, not preferred. `pipeline init` stops immediately with the install URL if `bun` isn't found.
-- **Claude Code, installed and authenticated** with your own subscription or API key. Pipeline steps are executed by `claude`; it is your account that runs them and your account that pays for them. If `claude` isn't on `PATH`, `init` says so, skips the plugin install and the starter run, and still exits 0 — the clone and the dashboard are done, and you re-run `pipeline init` once Claude Code is there.
+**Two prerequisites, and `init` is explicit about both.**
 
-The same two commands with real terminal output, start to finish: [Get started](https://ai-pipeline.dev/docs/getting-started).
+- **Bun.** The CLI's executable is TypeScript, so Bun is required, not preferred.
+  `pipeline init` stops immediately with the install URL if `bun` isn't found.
+- **Claude Code, installed and authenticated** with your own subscription or API
+  key. Pipeline steps are executed by `claude`; it is your account that runs them
+  and your account that pays for them. If `claude` isn't on `PATH`, `init` says
+  so, skips the plugin install and the starter run, and still exits 0 — the clone
+  and the dashboard are done, and you re-run `pipeline init` once Claude Code is
+  there.
 
-**Manual alternative.** Installing the plugin is one step of `init`. If you already have the CLI — or you want the plugin on its own, without a starter pipeline — run that step by hand from inside Claude Code instead:
+**The cloud step is the only network step, and it is not a trapdoor.** Nothing
+about your code or your keys goes with it: the control plane coordinates runs and
+shows you their status, and by default receives metadata only — statuses,
+timings, token counts — filtered on your machine before anything is sent. You do
+not need an account first; signing in creates one, and your first organization is
+created for you.
 
-```
+- **`pipeline init --local`** — everything except the cloud.
+- A **failed or declined** connect is a warning, not an error. `init` finishes
+  locally and exits 0; `pipeline cloud connect` picks it up later.
+- `--server`, `--org` and `--project` pass through to that connect. Under
+  `--json` no browser is ever opened: set `PIPELINE_MACHINE_TOKEN` to connect
+  non-interactively (CI, bots, agents), or the cloud step is skipped with a
+  stated reason and the rest still runs.
+
+Every step of `init` is idempotent (a re-run prints a `✓` per already-satisfied
+step and changes nothing) and independently skippable: `--no-plugin`, `--no-run`,
+`--no-runner`, plus `--yes` / `--json` for scripted setups, and
+`pipeline init <template>` to start from a different template
+(`pipeline clone --list` shows them).
+
+**Installing the plugin by hand.** It is one step of `init`. If you already have
+the CLI — or you want the plugin on its own, without a starter pipeline — run
+that step yourself from inside Claude Code:
+
+```text
 /plugin marketplace add IvanMurzak/pipeline-claude-marketplace
-/plugin install pipeline@ai-pipeline
+/plugin install pipeline@pipeline-claude
 ```
 
-This repository is itself the plugin, so the `pipeline` CLI under `apps/` ships inside — nothing else to fetch or build, and every `/pipeline:*` skill shells that bundled copy rather than a global install. Updates arrive via `/plugin update` whenever this repo's `.claude-plugin/plugin.json` version is bumped. The global `bun add -g` install is the same CLI released to npm on its own version line (`@baizor/pipeline`), for use from a bare terminal; the two are versioned independently, so a command can land in the bundled copy before it appears in the published package.
+**The global CLI is required, not optional.** Since plugin 0.93.0 the five hook
+relays are CLI subcommands rather than files in this repository, so a session
+started without `@baizor/pipeline` on `PATH` prints one actionable line from the
+SessionStart hook and every hook then degrades to a silent no-op. Updates to the
+plugin arrive via `/plugin update`; the CLI updates on its own npm version line.
+
+</details>
+
+## Your first pipeline
+
+```text
+/pipeline:clone support-answer        # a ready-made pipeline to run and adapt
+/pipeline:run .pipeline/support-answer/01-retrieve.md
+```
+
+Or describe what you want and let it author one:
+
+```text
+/pipeline:design a release pipeline — changelog, version bump, tag, GitHub release
+```
+
+Then, from any later task, stop choosing pipelines by hand:
+
+```text
+/pipeline:dispatch fix the flaky auth test in the checkout suite
+```
+
+`dispatch` matches your task against every pipeline manifest in the project with
+a deterministic BM25 matcher — free, no model call — and only escalates to a
+cheap Haiku disambiguator when the top two candidates are genuinely close. Most
+tasks resolve on the free tier.
+
+## Watch it run, from anywhere
+
+![The ai-pipeline.dev dashboard: stat tiles and a live run list](docs/pipeline-dashboard.svg)
+
+`pipeline init` connects this project to [**ai-pipeline.dev**](https://ai-pipeline.dev),
+where every run shows up live — status, step, elapsed, tokens, cost — with
+pipelines rendered as node graphs that light up as they execute. A run that
+parks for your approval says so, and you can answer it from the dashboard or
+from your phone.
+
+It runs on your metal. The cloud is a control plane, not a proxy: your
+subscription, your API keys, your machines, and model traffic never touches it.
+Metadata only by default — statuses, timings and token counts leave, transcripts
+and code do not, unless you opt up per project. `pipeline init --local` opts out
+of all of it and serves the same dashboard at `http://127.0.0.1:<port>/`.
+
+---
+
+## Documentation
+
+- [What you get](#what-you-get) · [Token discipline](#token-discipline-why-the-architecture-looks-the-way-it-does) · [Mental model](#mental-model)
+- [Using the plugin in a consumer project](#using-the-plugin-in-a-consumer-project) — [cheat sheet](#cheat-sheet--which-command-does-what), [day 1](#day-1--author-and-run-your-first-pipeline), [day 2+](#day-2--picking-the-right-pipeline-for-a-task), [pitfalls](#common-pitfalls)
+- [Iteration file shape](#iteration-file-shape) · [Finding the right pipeline](#finding-the-right-pipeline-for-a-task) · [Self-improving pipelines](#self-improving-pipelines)
+- [Script extraction](#token-cheap-iterations-via-script-extraction) · [Script steps](#script-steps-zero-token-steps) · [`ci-wait`](#waiting-on-github-ci-without-burning-tokens-pipeline-ci-wait)
+- [Measuring every run](#measuring-every-run-pipelinestats--pipelineoptimize) · [Nesting](#nesting) · [Parallel / DAG pipelines](#parallel--dag-pipelines-opt-in)
+- [Configuration reference](#configuration-reference) · [Where things live](#where-things-live) · [Watching a run](#watching-a-run)
+- [Departments](#departments-mcp--background-notifier) · [Resuming a halted pipeline](#resuming-a-halted-pipeline) · [Tips](#tips)
+
+Related repositories: the remote runner that lets connected compute pick up
+dispatched work lives in [`IvanMurzak/pipeline-runner`](https://github.com/IvanMurzak/pipeline-runner),
+and the Codex build of this plugin in [`IvanMurzak/pipeline-codex`](https://github.com/IvanMurzak/pipeline-codex).
 
 ## What you get
 
