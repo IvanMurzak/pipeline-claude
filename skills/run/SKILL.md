@@ -26,6 +26,26 @@ This skill is a supervisor, not a reader. Every iteration file is read by a `ste
 
 ## Runner selection (experimental)
 
+**Four modes exist, and `pipeline next` decides what runs next in every one of
+them (E1) — never the loop that calls it.** They differ only in *where the
+loop lives* and *what executes one step*:
+
+| Mode | Loop lives in | Executes one step |
+|---|---|---|
+| `session` | this main session | the `Agent` tool, in-session |
+| `manager` *(default)* | a `pipeline-manager` subagent | the `Agent` tool, in-session |
+| `driver` | a process this plugin owns, no model in the loop (`pipeline drive`) | a fresh `claude -p` process per step |
+| `standalone` | the same owned process as `driver` | the Agent SDK with your own API key — no Claude Code session at all |
+
+`driver` and `standalone` are easy to conflate because they share one loop and
+differ only in the executor; do not confuse either with `pipeline drive`, which
+is the command name for the `driver` path, not a synonym for the mode.
+**This bundled CLI implements `session`, `manager`, and `driver`** — v1
+pipelines spell `driver` as `runner: headless` in `PIPELINE.md` frontmatter (see
+below); `standalone` and a `pipeline.yml`-level `runner:` key belong to the
+same four-mode design but are not wired into this bundled copy yet, so do not
+tell a user either will run today.
+
 **Resolve `runner:` alongside the `model:` read at Procedure step 3.** In a v2 pipeline it is a top-level key in `pipeline.yml` — `Grep` `^runner:` there, which reads one line and never opens a step file; in v1 it is `PIPELINE.md` frontmatter, already inside the ≤50 lines you read for `model:`. **Absent or unreadable ⇒ `manager`**, today's behaviour and the deliberate default (E10). A value that *is* declared but has no branch below still runs `manager` — but **say so in one line before you start**, because a mode the manifest did not declare is a mode the author did not choose. Never infer the mode from chain length: an invisible threshold makes one command behave two ways.
 
 ### `runner: session` — the main session runs the loop itself
@@ -34,9 +54,9 @@ Do NOT spawn a `pipeline-manager`. Read [the session loop](references/session-lo
 
 That file carries the two preflight refusals this mode needs (a CLI too old for `pipeline next --brief-file`, and `execution: parallel`, whose payloads live in a brief the session may not open) and is honest about the trade: every action *and every step report* lands in the context the user is watching, so a long chain belongs in `manager` — which is precisely why `manager` is still the default.
 
-### `runner: headless` (v1) — the bundled driver
+### `runner: headless` (v1) — the `driver` mode
 
-When the pipeline is v1 and the `PIPELINE.md` frontmatter you read for `model:` also carries `runner: headless`, do NOT spawn a `pipeline-manager`. Instead run the bundled headless driver as a background process and supervise it:
+When the pipeline is v1 and the `PIPELINE.md` frontmatter you read for `model:` also carries `runner: headless` (v1's spelling of the `driver` mode — see the table above), do NOT spawn a `pipeline-manager`. Instead run the bundled driver as a background process and supervise it:
 
 ```bash
 bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" drive \
@@ -46,7 +66,7 @@ bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" drive \
   [--model "<step_id>=<model>" ...] [--effort "<step_id>=<level>" ...] --json [--resume]
 ```
 
-Launch it with `run_in_background: true` and act on its final JSON when it exits: exit 0 → emit `pipeline.completed`; exit 1 → emit `pipeline.halted` and surface the reason; exit 3 (`blocked`) → run the nested-blocker flow below, then re-run `drive` with `--resume`. Everything else about your supervisor role (run id, liveness, mirror binding, human reporting) is unchanged. Headless v1 skips self-improvement actions and leaves `.feedback/<run_id>/` intact — mention that in your final report so the user can run a manual improver pass. When `runner:` is absent or `manager`, proceed exactly as below.
+Launch it with `run_in_background: true` and act on its final JSON when it exits: exit 0 → emit `pipeline.completed`; exit 1 → emit `pipeline.halted` and surface the reason; exit 3 (`blocked`) → run the nested-blocker flow below, then re-run `drive` with `--resume`. Everything else about your supervisor role (run id, liveness, mirror binding, human reporting) is unchanged. This `driver` (v1: `runner: headless`) path skips self-improvement actions and leaves `.feedback/<run_id>/` intact — mention that in your final report so the user can run a manual improver pass. When `runner:` is absent or `manager`, proceed exactly as below.
 
 ## Model selection
 
@@ -56,11 +76,11 @@ A pipeline (and each iteration) may opt into a Claude model via the OPTIONAL `mo
 
 **Resolve `pipeline_default_model`:** in a v2 pipeline the CLI reads `defaults.model` from `pipeline.yml` itself — pass `null` and let it. Otherwise, if `<pipeline-root>/PIPELINE.md` exists, `Read` it with `limit: 50` and take the frontmatter `model:` value when it is an accepted value (an alias, a `claude-*` id, kept verbatim); `inherit`/absent → `null`. If `PIPELINE.md` is absent, `null`. **Invalid values** — anything that is not one of the accepted aliases, a `claude-*` id, `inherit`, or absent — warn once and fall through to `null` (do not halt). (Reading ≤ ~10 lines of frontmatter is metadata extraction, not content reading — it never duplicates what the step-executor loads.)
 
-**Per-run step overrides (`step_model_overrides`):** the user may pin individual steps to a different model FOR THIS RUN ONLY — without editing any pipeline file — either with explicit flags after the path (`--model <step_id>=<model>`, repeatable) or in natural language ("run steps 02-implement and 03-refine on fable"). Normalize whatever they said into `<step_id>=<model>` pairs: `step_id` is the step's `step_id` frontmatter or its filename stem (e.g. `02-implement` for `steps/02-implement.md`); `model` uses the accepted vocabulary above (`inherit` forces the session default for that step). You do NOT read any step file to validate the ids — the CLI warns on unknown ids and rejects invalid models. Pass the pairs to the manager as `step_model_overrides` (see 5.1) or, on the headless path, as repeated `--model` flags on the `drive` command. An override beats the step's own `model:` frontmatter; steps without an override are untouched. The CLI persists the overrides in the run's state at init, so resumes keep them automatically — re-pass the same pairs when re-invoking the manager anyway (harmless, and it survives a deleted `.runtime/`). No overrides mentioned ⇒ omit entirely.
+**Per-run step overrides (`step_model_overrides`):** the user may pin individual steps to a different model FOR THIS RUN ONLY — without editing any pipeline file — either with explicit flags after the path (`--model <step_id>=<model>`, repeatable) or in natural language ("run steps 02-implement and 03-refine on fable"). Normalize whatever they said into `<step_id>=<model>` pairs: `step_id` is the step's `step_id` frontmatter or its filename stem (e.g. `02-implement` for `steps/02-implement.md`); `model` uses the accepted vocabulary above (`inherit` forces the session default for that step). You do NOT read any step file to validate the ids — the CLI warns on unknown ids and rejects invalid models. Pass the pairs to the manager as `step_model_overrides` (see 5.1) or, on the `driver` path, as repeated `--model` flags on the `drive` command. An override beats the step's own `model:` frontmatter; steps without an override are untouched. The CLI persists the overrides in the run's state at init, so resumes keep them automatically — re-pass the same pairs when re-invoking the manager anyway (harmless, and it survives a deleted `.runtime/`). No overrides mentioned ⇒ omit entirely.
 
 ## Effort selection (reasoning effort — the `model:` twin)
 
-A pipeline and each iteration may also opt into a **reasoning effort** via the OPTIONAL `effort:` frontmatter field (levels: `low` / `medium` / `high` / `xhigh` / `max`; `inherit`/absent → the session's effort). It resolves through the exact same ladder as the model — per-run override ?? step `effort:` ?? pipeline `effort:` ?? inherit — entirely inside the `pipeline next` CLI. Resolve `pipeline_default_effort` from the same `PIPELINE.md` frontmatter read you already do for `model:` (same invalid-value rule: warn once, fall to `null`), hand it to the manager as `pipeline_default_effort`, and normalize user requests like "run 03-refine on max effort" into `step_effort_overrides` pairs (`<step_id>=<level>`) passed exactly like the model pairs (`--effort` flags on the headless path). HONESTY NOTE: the headless runner applies effort for real (`claude --effort` per spawn); in manager mode the Agent tool may not expose a per-call effort parameter yet — the manager passes it when supported and otherwise the step inherits the session effort (see pipeline-manager.md § run-step).
+A pipeline and each iteration may also opt into a **reasoning effort** via the OPTIONAL `effort:` frontmatter field (levels: `low` / `medium` / `high` / `xhigh` / `max`; `inherit`/absent → the session's effort). It resolves through the exact same ladder as the model — per-run override ?? step `effort:` ?? pipeline `effort:` ?? inherit — entirely inside the `pipeline next` CLI. Resolve `pipeline_default_effort` from the same `PIPELINE.md` frontmatter read you already do for `model:` (same invalid-value rule: warn once, fall to `null`), hand it to the manager as `pipeline_default_effort`, and normalize user requests like "run 03-refine on max effort" into `step_effort_overrides` pairs (`<step_id>=<level>`) passed exactly like the model pairs (`--effort` flags on the `driver` path). HONESTY NOTE: the `driver` runner applies effort for real (`claude --effort` per spawn); in manager mode the Agent tool may not expose a per-call effort parameter yet — the manager passes it when supported and otherwise the step inherits the session effort (see pipeline-manager.md § run-step).
 
 ## Prerequisites
 

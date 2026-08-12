@@ -157,7 +157,7 @@ of all of it and serves the same dashboard at `http://127.0.0.1:<port>/`.
 
 ## Documentation
 
-- [What you get](#what-you-get) · [Token discipline](#token-discipline) · [Mental model](#mental-model)
+- [What you get](#what-you-get) · [Token discipline](#token-discipline) · [Mental model](#mental-model) · [Execution modes](#execution-modes)
 - [Using the plugin in a consumer project](#using-the-plugin-in-a-consumer-project) — [cheat sheet](#cheat-sheet--which-command-does-what), [day 1](#day-1--author-and-run-your-first-pipeline), [day 2+](#day-2--picking-the-right-pipeline-for-a-task), [pitfalls](#common-pitfalls)
 - [Iteration file shape](#iteration-file-shape) · [Finding the right pipeline](#finding-the-right-pipeline-for-a-task) · [Self-improving pipelines](#self-improving-pipelines)
 - [Script extraction](#token-cheap-iterations-via-script-extraction) · [Script steps](#script-steps-zero-token-steps) · [`ci-wait`](#waiting-on-github-ci-without-burning-tokens-pipeline-ci-wait)
@@ -280,6 +280,41 @@ base. It is **not parsed** — configuration put there does nothing.
 **Already have a v1 pipeline?** `pipeline migrate --to-manifest --root <dir>`
 generates the manifest and prints the old→new step-name map. v1 pipelines keep
 running meanwhile.
+
+## Execution modes
+
+Every pipeline runs in one of four modes. **In all four, a deterministic CLI —
+`pipeline next` — decides what runs next, not the model.** That guarantee holds
+whether the loop asking it lives in this session, in a subagent, or in a
+process with no model in it at all; only *where the loop lives* and *what
+executes one step* change between them.
+
+| Mode | Loop lives in | Executes one step |
+|---|---|---|
+| `session` | This Claude Code session | The `Agent` tool, as a subagent, in this session |
+| `manager` *(default)* | A `pipeline-manager` subagent | The `Agent` tool, as a subagent |
+| `driver` | A process the plugin owns — no model in the loop | A fresh `claude -p` process per step, spawned by `pipeline drive` |
+| `standalone` | The same owned process as `driver` | The Agent SDK, using your own API key — no Claude Code session at all |
+
+`session` and `manager` trade context for moving parts: `session` keeps every
+action *and* every step report in the window you are watching (fewest moving
+parts, cheapest for a short chain — see [`session-loop.md`](skills/run/references/session-loop.md)),
+while `manager` hands the loop to a subagent so a long chain never fills your
+session — which is why `manager` stays the default when a pipeline declares no
+mode. `driver` and `standalone` share that same owned loop and differ only in
+the executor: `driver` shells out to a fresh `claude -p` per step and rides
+your existing Claude Code subscription; `standalone` goes through the Agent SDK
+with your own API key instead, so no Claude Code installation is required at
+all. Don't read `driver` (the mode) and `pipeline drive` (the command) as
+interchangeable — one names a concept, the other names how you invoke it.
+
+**What ships in this plugin today:** `session` and `manager` run through
+`/pipeline:run`; `driver` runs through `pipeline drive`, which v1 pipelines
+select via the `PIPELINE.md` field `runner: headless` (`driver`'s v1 spelling —
+a rename with a read-time shim, so nothing that already sets it changes
+behavior). `standalone` and a `pipeline.yml`-level `runner:` key belong to this
+same four-mode design but are not wired into this bundled CLI yet — nothing
+here is a promise that either runs today.
 
 ## Using the plugin in a consumer project
 
@@ -676,7 +711,7 @@ simple text files to review whenever you like:
 FAILED during the run (`tokens.tools_failed` + a per-tool breakdown like `{"Bash": 5}`), and
 appends each failure — timestamp, tool, the step it happened in, the error the tool returned —
 to the run's `.log`. A run can be "completed" and still be sick: dozens of failed calls mean the
-steps are retrying their way to success on wrong instructions. Headless (`pipeline drive`) runs
+steps are retrying their way to success on wrong instructions. `driver` (`pipeline drive`) runs
 fold their pinned per-step session transcripts at the terminal action, so their failures carry
 exact step attribution; manager runs attribute by step time-windows.
 
@@ -916,7 +951,7 @@ flow:
 `when` matches a result flag a step reported; `max` bounds how many times an
 edge may be taken per run. Always end a conditional node with a default edge.
 
-**Environment variables** (dashboard on/off, prompt-match hook, headless executor command, hook timeouts, debug flags): see [Environment variables (reference)](#environment-variables-reference) below.
+**Environment variables** (dashboard on/off, prompt-match hook, `driver` executor command, hook timeouts, debug flags): see [Environment variables (reference)](#environment-variables-reference) below.
 
 ## No leaked branches or worktrees
 
@@ -975,7 +1010,7 @@ field, and [Connecting to the cloud](docs/cloud-connect.md).
 
 **`pipeline logs` is the offline path** and needs no account, no daemon and no
 network — see the next section. `pipeline logs -f` tails the same journal live,
-and `pipeline logs --chat <run-id>` renders a finished headless run's Claude Code
+and `pipeline logs --chat <run-id>` renders a finished `driver` run's Claude Code
 transcript in the terminal, which is the post-mortem a `pipeline drive` run
 otherwise leaves scattered across files nobody opens.
 
@@ -1004,7 +1039,7 @@ pipeline logs --follow
 
 Flags: `-f`/`--follow` to stream live, `--tail <n>` (default 20) for the initial backlog, `--all` for the whole journal, `--json` for raw JSON lines, `--no-color`, and `--project <path>` to point at a project other than the cwd. It is **read-only** — it starts no background process and writes nothing — so it works with or without a cloud account. Stop it with Ctrl-C.
 
-`pipeline logs --chat <run-id>` is the other half: it renders that run's Claude Code transcript(s) in the terminal — the post-mortem for a headless `pipeline drive` run, whose steps execute as separate processes and whose subagent transcripts otherwise become files nobody opens. It reads only what is already on your disk and uploads nothing.
+`pipeline logs --chat <run-id>` is the other half: it renders that run's Claude Code transcript(s) in the terminal — the post-mortem for a `driver` (`pipeline drive`) run, whose steps execute as separate processes and whose subagent transcripts otherwise become files nobody opens. It reads only what is already on your disk and uploads nothing.
 
 ### The journal/analytics master switch — `PIPELINE_JOURNAL_ENABLED`
 
@@ -1099,7 +1134,7 @@ Everything the plugin reads from the environment, in one place. Set the per-proj
 | `PIPELINE_CLOUD_API` | `https://api.ai-pipeline.dev` | Overrides the control-plane API base used by `pipeline cloud connect` and the department notifier. |
 | `PIPELINE_CLOUD_HOME` | platform default (`%APPDATA%\claude-pipeline` on Windows, `$XDG_CONFIG_HOME/claude-pipeline` / `~/.config/claude-pipeline` elsewhere) | Overrides the per-user directory holding the cloud credential store and the department notifier's journal/lock files. |
 | `PIPELINE_MACHINE_TOKEN` | unset | The no-human path for `pipeline cloud connect` (bots, CI, autonomous agents): an `aip_m_<client-id>.<secret>` machine credential from your dashboard's Settings → Machine credentials. Its presence suppresses every prompt and browser/device-code attempt — pass `--org <slug>` too (a machine credential has no discoverable org). `--machine-token <token>` is the flag equivalent; the env var is preferred since argv is world-readable in `ps`. Combining either with `--device` is a usage error (exit 2). |
-| `PIPELINE_DRIVE_EXECUTOR_CMD` | `claude -p --agent pipeline:step-executor --model {model} --effort {effort} --permission-mode {permissions} --session-id {session} --add-dir {record_dir} --plugin-dir {plugin_dir} --output-format stream-json --verbose --json-schema {schema}` | Overrides the command template the EXPERIMENTAL headless runner (`pipeline drive`) spawns per step. Whitespace-split; tokens `{model}` / `{effort}` / `{permissions}` / `{session}` / `{record_dir}` / `{plugin_dir}` / `{schema}` are substituted (a flag+token pair is dropped when the token has no value; on an answer/crash resume the flag before `{session}` becomes `--resume`); the step prompt always arrives on stdin. `{plugin_dir}` (CLAUDE_PLUGIN_ROOT) keeps `--agent pipeline:step-executor` resolvable once `-p` defaults to `--bare`; unlike `{session}`/`{record_dir}` it is never appended to a template that omits it, so a pre-existing override is unaffected. Equivalent to `--executor-cmd`. |
+| `PIPELINE_DRIVE_EXECUTOR_CMD` | `claude -p --agent pipeline:step-executor --model {model} --effort {effort} --permission-mode {permissions} --session-id {session} --add-dir {record_dir} --plugin-dir {plugin_dir} --output-format stream-json --verbose --json-schema {schema}` | Overrides the command template the EXPERIMENTAL `driver` runner (`pipeline drive`) spawns per step. Whitespace-split; tokens `{model}` / `{effort}` / `{permissions}` / `{session}` / `{record_dir}` / `{plugin_dir}` / `{schema}` are substituted (a flag+token pair is dropped when the token has no value; on an answer/crash resume the flag before `{session}` becomes `--resume`); the step prompt always arrives on stdin. `{plugin_dir}` (CLAUDE_PLUGIN_ROOT) keeps `--agent pipeline:step-executor` resolvable once `-p` defaults to `--bare`; unlike `{session}`/`{record_dir}` it is never appended to a template that omits it, so a pre-existing override is unaffected. Equivalent to `--executor-cmd`. |
 | `PIPELINE_HOOK_TIMEOUT_MS` | per-hook (600 000 create/finalize, 300 000 destroy) | Overrides the external-isolation worktree-hook timeout (positive integer, milliseconds). Mostly useful for testing hooks. |
 | `PIPELINE_WORKTREE_SCOPED` | on | Worktree-scoped pipeline I/O for `isolation: run` runs (the run plans from, and self-improves into, the run worktree's pipeline copy — committed state only). `0`/`false` restores the legacy main-scoped reads. FROZEN per run into `next.json` at init — a mid-run flip never mixes path models within one run. |
 | `PIPELINE_GIT_BIN` / `PIPELINE_GH_BIN` | `git` / `gh` from PATH | Override which `git`/`gh` binaries the CLI's guarded git operations (`pipeline submodule bump`) invoke. |
@@ -1107,7 +1142,7 @@ Everything the plugin reads from the environment, in one place. Set the per-proj
 
 **Hook contract (set BY the plugin, read by your hook scripts):** every `PIPELINE_WT_*` variable passed to the `worktree-create` / `worktree-finalize` / `worktree-destroy` hooks is specified in [`docs/worktree-hook-contract.md`](docs/worktree-hook-contract.md) — that contract is frozen; write hooks against it, never set those variables yourself.
 
-**Internal (do not set):** `PIPELINE_RUN_ID` / `PIPELINE_PARENT_RUN_ID` are run-correlation plumbing between `/pipeline:run` and the analytics hooks; setting them manually mis-attributes events. `PIPELINE_STATS_RUNNER` is set by `pipeline drive` to tag headless runs in the measurement files.
+**Internal (do not set):** `PIPELINE_RUN_ID` / `PIPELINE_PARENT_RUN_ID` are run-correlation plumbing between `/pipeline:run` and the analytics hooks; setting them manually mis-attributes events. `PIPELINE_STATS_RUNNER` is set by `pipeline drive` to tag `driver` runs in the measurement files.
 
 ## Departments (`/mcp` + background notifier)
 
