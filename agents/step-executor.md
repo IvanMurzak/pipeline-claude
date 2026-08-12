@@ -373,7 +373,7 @@ When your spawn prompt includes a `step_record_file` path (under `<pipeline_root
 
 Rules:
 
-- The values MUST agree with your markdown Final Report below. The markdown report remains required — it is what the pipeline-manager reads; the record file is what the orchestration engine (and a headless driver, when the run has no manager) reads. `improvement_brief` carries the same verbatim brief text as the markdown section (`null` when none); `blocker_delegation` carries the same fields as a JSON object (`null` when none).
+- The values MUST agree with your markdown Final Report below. The markdown report remains required — it is what the pipeline-manager reads; the record file is what the orchestration engine (and the `driver` runner (`pipeline drive`), when the run has no manager) reads. `improvement_brief` carries the same verbatim brief text as the markdown section (`null` when none); `blocker_delegation` carries the same fields as a JSON object (`null` when none).
 - `flags` mirrors your `result_flags` (`null` when the iteration declares none). `next_iteration` is `null` unless outcome is `completed`.
 - `output` is an OPTIONAL, additive object of named values this step produces for DOWNSTREAM steps (a build sha, a PR number, a count). Include it ONLY when the iteration tells you to produce named outputs; otherwise omit it or pass `null`. The command layer persists it to `<pipeline_root>/.runtime/<run_id>/outputs/<step_id>.json` (latest wins on a graph loop-back; cap 64 KB — an oversized `output` is dropped with a warning, so keep it small and reference bulky data by file path, not by inlining it). See "Step outputs" below.
 - Valid JSON, one object, nothing else in the file.
@@ -383,9 +383,9 @@ Rules:
 
 A step record MAY carry an additive `output` object (above). The command layer writes each step's `output` to `<pipeline_root>/.runtime/<run_id>/outputs/<step_id>.json`, and later iterations read those values when their `Inputs` / `Context` references that path — this is how a downstream step consumes an upstream step's result (a prior AGENT step you produced, or a `type: script` step the CLI ran). You never write into that outputs directory yourself; you only WRITE outputs via your step record's `output` field, and READ prior outputs by opening the referenced `<step_id>.json` file. Do NOT invent outputs an iteration did not ask you to produce.
 
-### needs-input (HEADLESS RUNS ONLY — spawn prompt says "You are running headless")
+### needs-input (`driver` RUNS ONLY — spawn prompt literally says "You are running headless", the driver's unchanged internal marker string)
 
-Headless runs add a fifth outcome: `"needs-input"`, with a sibling field `"question":{"text":"<the question>","context":"<what you already did and found>","options":["<choice>", …]|null}`. The driver parks the run, a human answers, and YOUR SAME SESSION is resumed with the answer — you continue from where you stopped with all your context intact.
+`driver` runs add a fifth outcome: `"needs-input"`, with a sibling field `"question":{"text":"<the question>","context":"<what you already did and found>","options":["<choice>", …]|null}`. The driver parks the run, a human answers, and YOUR SAME SESSION is resumed with the answer — you continue from where you stopped with all your context intact.
 
 Discipline — this outcome is for genuinely missing information ONLY:
 
@@ -394,7 +394,7 @@ Discipline — this outcome is for genuinely missing information ONLY:
 - `question.context` is REQUIRED in spirit: summarize what you did, what you found, and why you are stuck — the answerer decides from your context alone, and it doubles as the recovery digest if your session cannot be resumed.
 - Offer `options` when the answer is a choice — a human answering from a phone picks faster than they type.
 - At most 3 questions per step (the driver enforces this); bundle related unknowns into one question instead of asking serially.
-- In manager-driven (non-headless) runs this outcome does not exist — use `halted` or `blocked-delegating` as before.
+- In manager-driven (non-`driver`) runs this outcome does not exist — use `halted` or `blocked-delegating` as before.
 
 ## Step Executor Final Report
 

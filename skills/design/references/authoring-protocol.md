@@ -427,7 +427,7 @@ Domain outcomes (CI red, no changes to release, zero matches found) are **`ok:tr
 **Constraints** (each mirrors a `plan.ts` lint or a runtime rule):
 
 - **No `model:` / `effort:` / `permission-mode:` on a script step** — no agent runs, so they are meaningless (plan **WARNING**, ignored). Conversely, the script-only fields (`script`, `command`, `timeout`, `on-failure`) placed on a `type: agent` step are also ignored with a WARNING — `retries:` is the one exception (above), honored on both step kinds with distinct meanings.
-- **A script `timeout:` above `MANAGER_SAFE_TIMEOUT_S` (420 s) on a `runner: manager` pipeline is a plan WARNING** — the manager reaches `pipeline next` through a 10-minute Bash call, so a long script risks the outer ceiling. Use `runner: headless` (infinite call budget) or split the work.
+- **A script `timeout:` above `MANAGER_SAFE_TIMEOUT_S` (420 s) on a `runner: manager` pipeline is a plan WARNING** — the manager reaches `pipeline next` through a 10-minute Bash call, so a long script risks the outer ceiling. Use `runner: headless` (the `driver` mode's v1 spelling; infinite call budget) or split the work.
 - **Secrets NEVER travel through `params:` or `output:`.** Scripts inherit the process environment and read secrets directly (`os.environ`); `${env.…}` bindings are for non-secret values only (hence the secret-name-pattern WARNING above).
 - **Parallel/DAG script steps run in-place** — no worktree, no merge entry — so **disjoint-footprint discipline is your job** (as with any parallel step, Principle 12). In a parallel layer, `on-failure: agent` degrades to `halt` in v1.
 
@@ -453,7 +453,7 @@ model: opus
 ---
 ```
 
-**`effort:` (OPTIONAL — the reasoning-effort twin of `model:`).** A step and `defaults:` may carry an `effort:` key with the same inherit-by-default semantics and the same resolution ladder (step wins over pipeline; pipeline wins over the session's effort level). **Accepted vocabulary:** `low` | `medium` | `high` | `xhigh` | `max` | `inherit` (or omit — inherit). Emit it only when a step genuinely warrants more or less thinking than the session default — e.g. `effort: max` on a hard architectural-reasoning step, `effort: low` on mechanical scaffolding — or when the caller expresses it ("think as hard as possible on the review step"). It composes freely with `model:` (`model: opus` + `effort: max` pins both). Honesty note for your designs: the headless runner (`pipeline drive`) applies it for real via `claude --effort` on every executor spawn; manager-driven runs pass it to the Agent tool only when the harness supports a per-call effort parameter (otherwise the step inherits the session's effort).
+**`effort:` (OPTIONAL — the reasoning-effort twin of `model:`).** A step and `defaults:` may carry an `effort:` key with the same inherit-by-default semantics and the same resolution ladder (step wins over pipeline; pipeline wins over the session's effort level). **Accepted vocabulary:** `low` | `medium` | `high` | `xhigh` | `max` | `inherit` (or omit — inherit). Emit it only when a step genuinely warrants more or less thinking than the session default — e.g. `effort: max` on a hard architectural-reasoning step, `effort: low` on mechanical scaffolding — or when the caller expresses it ("think as hard as possible on the review step"). It composes freely with `model:` (`model: opus` + `effort: max` pins both). Honesty note for your designs: the `driver` runner (`pipeline drive`) applies it for real via `claude --effort` on every executor spawn; manager-driven runs pass it to the Agent tool only when the harness supports a per-call effort parameter (otherwise the step inherits the session's effort).
 
 ```yaml
 ---
@@ -462,7 +462,7 @@ effort: max
 ---
 ```
 
-**`permission-mode:` (OPTIONAL, headless runs only, v1 only — a v2 manifest has no such key).** A v1 step or `PIPELINE.md` may carry a `permission-mode:` frontmatter field consumed ONLY by the headless runner (`pipeline drive`) as the executor subprocess's `--permission-mode` (step wins over pipeline; default `acceptEdits`; the value `inherit` passes no flag so the machine's own settings apply). Manager-driven runs ignore it (subagents inherit the session's permissions). Omit it unless the pipeline is authored for headless execution AND a step genuinely needs a stricter (`dontAsk`, `plan`) or looser mode than the `acceptEdits` default.
+**`permission-mode:` (OPTIONAL, `driver` runs only, v1 only — a v2 manifest has no such key).** A v1 step or `PIPELINE.md` may carry a `permission-mode:` frontmatter field consumed ONLY by the `driver` runner (`pipeline drive`) as the executor subprocess's `--permission-mode` (step wins over pipeline; default `acceptEdits`; the value `inherit` passes no flag so the machine's own settings apply). Manager-driven runs ignore it (subagents inherit the session's permissions). Omit it unless the pipeline is authored for `driver` execution AND a step genuinely needs a stricter (`dontAsk`, `plan`) or looser mode than the `acceptEdits` default.
 
 ### 12. Parallel / DAG pipelines (OPT-IN — default stays sequential)
 

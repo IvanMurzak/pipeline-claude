@@ -50,7 +50,7 @@ which only the user can trigger (`disable-model-invocation: true`). Keep the pas
 3. **Investigate each flagged pipeline, cheaply.** Read its 2–3 most recent
    `runs/<run-id>.log` files; correlate with `halt_reason`s from the summary. For tool failures,
    the evidence is IN the .log: enrichment appends a `tool fails (N):` section — one line per
-   failure with timestamp, tool, `[step]` when attributable (exact for headless runs;
+   failure with timestamp, tool, `[step]` when attributable (exact for `driver` runs;
    timestamp-mapped for manager runs), and the error the tool returned. Classify each pattern:
    - **pipeline-attributable** — the same error recurs across runs and points at the iteration's
      instructions: a wrong/stale command or path in Steps, a missing preflight (tool not
@@ -87,6 +87,6 @@ which only the user can trigger (`disable-model-invocation: true`). Keep the pas
   plugin install, never `.stats/` contents (the evidence is append-only; do not "clean" it).
 - This skill NEVER runs pipelines and NEVER deletes measurement files.
 - If `.stats/` shows tokens `pending` everywhere, note that enrichment happens when a
-  manager-driven run's session ends (headless runs enrich themselves at their terminal action) —
+  manager-driven run's session ends (`driver` runs enrich themselves at their terminal action) —
   that is expected, not a defect. Runs recorded BEFORE the plugin learned to persist tool
   failures show `—` in the Tool fails columns; that means "not measured", not "zero".

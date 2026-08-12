@@ -57,7 +57,7 @@ skill's `allowed-tools` is `Bash` only, which enforces that.)
 
 3. **On a successful clone, tell the user briefly how to run it.** Keep it short:
    - Run it from here: `/pipeline:run <cwd>/.pipeline/<name>/steps/01-*.md`, or
-   - Run it headless from a terminal: `pipeline drive <name>`.
+   - Run it as a `driver` from a terminal: `pipeline drive <name>`.
    - For the **`support-answer`** template specifically, mention that it takes two
      pipeline variables — `PP_QUESTION` (the question to answer) and `PP_DOCS_DIR`
      (the folder to retrieve over) — passed as
