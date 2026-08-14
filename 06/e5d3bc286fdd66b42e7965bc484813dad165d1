@@ -1,0 +1,33 @@
+hooks/run-hook.sh
+  s_303d0d7286eb57::t_258b42ac431ef6 80-112,114-118
+  s_303d0d7286eb57::t_0526debae78eab 140-161,168,172-221
+  s_303d0d7286eb57::t_c4e57bbf663682 269-276
+  s_303d0d7286eb57::t_24e1aa0ced6f59 162-167,169-171
+CLAUDE.md
+  s_303d0d7286eb57::t_2b8f016c8a30f2 70
+.claude-plugin/plugin.json
+  s_303d0d7286eb57::t_d66d9d42693916 3
+docs/journal-and-hooks.md
+  s_303d0d7286eb57::t_ad91fad15bbd88 52-65
+tests/hook-run-shim.test.ts
+  s_303d0d7286eb57::t_ae426517b4834c 448-612
+  s_303d0d7286eb57::t_fb1861c67dc936 52-64
+CHANGELOG.md
+  s_303d0d7286eb57::t_050e2fdc1751c8 7-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "06e5d3bc286fdd66b42e7965bc484813dad165d1",
+  "prompts": {},
+  "sessions": {
+    "s_303d0d7286eb57": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ccf91804-9560-4674-84cf-ff47468a24e8",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
