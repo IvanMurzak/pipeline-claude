@@ -77,9 +77,45 @@
 # Cost: zero on the normal path (the probe only runs after a failure), one
 # extra short-lived process on a path that has already failed.
 #
+# ── MINIMUM CLI VERSION: hook-capable but still too old (plugin-thin B.2) ───
+#
+# The mitigation above only classifies "this CLI has never heard of `hook`".
+# It says nothing about a CLI that DOES answer `hook --help` — and every
+# relay call — but is nonetheless older than what this plugin's skills and
+# agents actually assume (a flag `pipeline next` only just grew, for
+# example). T-CLI-1 was answered NO (2026-08-14, re-checked here): the plugin
+# manifest schema (`.claude-plugin/plugin.json`) has no field for an external
+# prerequisite, so MIN_CLI_VERSION below is the single declared floor, and
+# this file is the only place that compares against it — `pipeline --version`
+# is not checked anywhere else in this plugin.
+#
+# The check runs ONLY on the `--loud` SessionStart entry (`--loud hook
+# session-relay`), and ONLY after that relay call has already succeeded —
+# i.e. only once this CLI is already known to have `hook`. That keeps this
+# mechanism and the one above strictly disjoint: a CLI old enough to fail the
+# `hook --help` probe is classified (and warned about) up there and never
+# reaches this check, so the two can never both print in the same session.
+# Too old → one line to stderr naming the upgrade command; current or newer →
+# silence; a `--version` output that doesn't parse as this CLI's real shape
+# (bare `N.N.N`, verified against an actual install — see
+# check_min_cli_version below) → treated as UNKNOWN, reported once, never
+# treated as "too old" and never silently ignored.
+#
+# Channel, deliberately: STDERR — the same one the not-installed and
+# no-hook-subcommand lines above already use. Per Claude Code's hooks docs
+# (verified 2026-08-14), a SessionStart hook's STDOUT becomes
+# additionalContext — text Claude's context can see, not a guaranteed
+# user-visible banner — and SessionStart cannot block the session either way.
+# Matching the existing lines' channel keeps this file's `--loud` contract
+# single-shaped instead of adding a second delivery mechanism for what is the
+# same class of message.
+#
 # Usage: run-hook.sh [--loud] <args passed to `pipeline`>
-#   --loud   pipeline-not-found, and an unusably old CLI, each print ONE
-#            actionable line to stderr before exiting 0. Reserved for
+#   --loud   pipeline-not-found, and an unusably old CLI — whether it lacks
+#            `hook` entirely or merely falls below MIN_CLI_VERSION — each
+#            print ONE actionable line to stderr before exiting 0 (never more
+#            than one such line per session; the two old-CLI mechanisms are
+#            mutually exclusive, see MINIMUM CLI VERSION above). Reserved for
 #            SessionStart, which fires once per session and is where a user
 #            can actually see and act on it. After `p6` the plugin genuinely
 #            REQUIRES an installed CLI of a recent enough version — it ships
@@ -100,6 +136,88 @@
 #   4. /opt/homebrew/bin/pipeline        (Homebrew, Apple Silicon)
 #   5. /usr/local/bin/pipeline           (Homebrew Intel / common Linux, and
 #                                         npm's default global prefix there)
+
+# Minimum @baizor/pipeline version this plugin's skills/agents/hooks assume.
+# SINGLE SOURCE OF TRUTH for that number — nothing else in this repository
+# may declare it a second time (one source; two is the failure mode this
+# exists to prevent). Bump it when a skill, agent or hook starts depending on
+# a CLI feature this version predates (see CHANGELOG.md's "requires a CLI new
+# enough for …" notes). Floor chosen 2026-08-14 as the version verified
+# locally to support both `pipeline hook <name>` and `pipeline next
+# --brief-file`, the two newest hard CLI dependencies this plugin has.
+MIN_CLI_VERSION="0.19.0"
+
+# Compares $PIPELINE_BIN's own `--version` output against MIN_CLI_VERSION and
+# prints exactly one line to stderr if it is older; silent if current, newer,
+# or unparseable-but-still-warned-once (see below). Never touches the
+# caller's exit code or `$status` — version skew here must never block the
+# session, exactly like the mechanism above. Callers must gate on `--loud`
+# themselves; this function does not check `$mode`.
+#
+# `--version`'s actual output shape was checked against a real install, not
+# assumed: a bare `N.N.N`, nothing else, exit 0. Anything that does not fit
+# that exact shape (extra text, a `v` prefix, fewer/more than three numeric
+# parts, an empty part) is UNKNOWN — reported once, never treated as "too
+# old" and never silently swallowed, so a CLI that changes its `--version`
+# shape later degrades to a note instead of a false accusation. A trailing CR
+# is stripped with pure parameter expansion (no external `tr`, deliberately —
+# this shim resolves its own PATH and must not assume anything else is on it)
+# in case a CRLF-emitting binary is ever in the resolution chain (this repo
+# has shipped that exact class of bug before), even though the real CLI
+# verified here does not emit one.
+check_min_cli_version() {
+  cmcv_installed=$("$PIPELINE_BIN" --version 2>&1 </dev/null)
+  cmcv_cr=$(printf '\r')
+  cmcv_installed=${cmcv_installed%"$cmcv_cr"}
+
+  cmcv_shape_ok="yes"
+  case "$cmcv_installed" in
+    ''|*[!0-9.]*) cmcv_shape_ok="" ;;
+  esac
+
+  if [ -n "$cmcv_shape_ok" ]; then
+    IFS='.'
+    set -- $cmcv_installed
+    unset IFS
+    if [ $# -ne 3 ]; then
+      cmcv_shape_ok=""
+    else
+      cmcv_i_major=$1
+      cmcv_i_minor=$2
+      cmcv_i_patch=$3
+      case "$cmcv_i_major" in ''|*[!0-9]*) cmcv_shape_ok="" ;; esac
+      case "$cmcv_i_minor" in ''|*[!0-9]*) cmcv_shape_ok="" ;; esac
+      case "$cmcv_i_patch" in ''|*[!0-9]*) cmcv_shape_ok="" ;; esac
+    fi
+  fi
+
+  if [ -z "$cmcv_shape_ok" ]; then
+    printf '%s\n' "pipeline plugin: could not read the installed 'pipeline' CLI's version (--version printed '$cmcv_installed') - skipping the minimum-version check for this session; if something behaves oddly, upgrade with 'bun add -g @baizor/pipeline' (or 'npm i -g @baizor/pipeline')" >&2
+    return
+  fi
+
+  IFS='.'
+  set -- $MIN_CLI_VERSION
+  unset IFS
+  cmcv_m_major=$1
+  cmcv_m_minor=$2
+  cmcv_m_patch=$3
+
+  cmcv_older=""
+  if [ "$cmcv_i_major" -lt "$cmcv_m_major" ]; then
+    cmcv_older="yes"
+  elif [ "$cmcv_i_major" -eq "$cmcv_m_major" ]; then
+    if [ "$cmcv_i_minor" -lt "$cmcv_m_minor" ]; then
+      cmcv_older="yes"
+    elif [ "$cmcv_i_minor" -eq "$cmcv_m_minor" ] && [ "$cmcv_i_patch" -lt "$cmcv_m_patch" ]; then
+      cmcv_older="yes"
+    fi
+  fi
+
+  if [ -n "$cmcv_older" ]; then
+    printf '%s\n' "pipeline plugin: the installed 'pipeline' CLI ($cmcv_installed) is older than this plugin needs (>= $MIN_CLI_VERSION) - upgrade with 'bun add -g @baizor/pipeline' (or 'npm i -g @baizor/pipeline')" >&2
+  fi
+}
 
 mode="quiet"
 if [ "${1:-}" = "--loud" ]; then
@@ -148,6 +266,14 @@ fi
 status=$?
 
 if [ "$status" -eq 0 ]; then
+  # This CLI just answered `hook` successfully, so it is not the "no `hook`
+  # subcommand at all" case the probe below classifies. It can still be older
+  # than MIN_CLI_VERSION — the check is scoped to --loud (SessionStart) only,
+  # both to avoid flooding every other hook and because it is the only entry
+  # a user can act on.
+  if [ "$mode" = "loud" ]; then
+    check_min_cli_version
+  fi
   exit 0
 fi
 

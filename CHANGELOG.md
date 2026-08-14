@@ -4,6 +4,41 @@ Notable changes to the `pipeline` Claude Code plugin and the `@baizor/pipeline` 
 (they live in one repo and release together; version numbers are independent — see below).
 This file starts here; earlier history is in `git log`.
 
+## plugin 0.96.0 — SessionStart warns about a too-old (but hook-capable) CLI
+
+`hooks/run-hook.sh`'s existing skew mitigation (0.93.0 / [#112]) only catches a CLI that has
+**never heard of `hook`** — it classifies that case with a read-only `pipeline hook --help`
+probe. It said nothing about a CLI that answers `hook` just fine (so that probe would also
+succeed) but is nonetheless **older than what this plugin's skills and agents actually
+assume** — `runner: session`'s own `pipeline next --brief-file` preflight (0.95.0) is exactly
+that kind of assumption, generalized.
+
+`run-hook.sh` now declares a single **`MIN_CLI_VERSION`** constant and compares the resolved
+binary's own `pipeline --version` against it — once per session, on the `--loud` SessionStart
+entry only, and only once that entry's own `hook session-relay` call has already succeeded (so
+this mechanism and the pre-existing one are structurally disjoint: a CLI old enough to fail the
+`hook --help` probe is classified up there and never reaches this check, and a dedicated test
+proves the two can never both print in the same session). Too old → one actionable line to
+**stderr** naming the upgrade command, matching the channel the not-installed and
+no-hook-subcommand lines already use; current or newer → silence; a `--version` output that
+doesn't parse as this CLI's real shape (a bare `N.N.N`, checked against an actual install, not
+assumed) → treated as **unknown**, reported once, never treated as "too old" and never silently
+swallowed.
+
+**Why the manifest doesn't declare this instead.** T-CLI-1 was re-checked at implementation
+time: `.claude-plugin/plugin.json`'s schema still has no field for an external prerequisite (its
+only dependency mechanism targets other *plugins*), so `MIN_CLI_VERSION` in `run-hook.sh` is the
+one place this floor is declared — bump it there, and nowhere else, when a skill starts
+depending on a newer CLI feature.
+
+**Channel, stated plainly.** Per Claude Code's hooks docs, a SessionStart hook's stdout becomes
+`additionalContext` — text Claude's context can see, not a guaranteed user-visible banner — and
+a SessionStart hook cannot block the session either way. This line goes to stderr, deliberately
+matching precedent rather than adding a second delivery mechanism; it carries the same caveat the
+existing not-installed and no-hook-subcommand lines already carry.
+
+[#112]: https://github.com/IvanMurzak/pipeline-claude/pull/112
+
 ## plugin 0.95.0 — a pipeline can ask the main session to drive it
 
 New execution mode **`session`**, selected by the manifest's top-level `runner:` key

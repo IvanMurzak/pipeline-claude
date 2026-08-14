@@ -49,6 +49,19 @@
  *     correct non-zero exit and swallowing it would disable a safety control.
  *     Both directions are asserted below with two different fake CLIs; a
  *     blanket `exit 0` fails the second one.
+ *   - pipeline PRESENT, HAS `hook`, BUT BELOW MIN_CLI_VERSION (plugin-thin
+ *     B.2, the case the mechanism above cannot see: `hook --help` succeeds,
+ *     so it never gets classified as "no hook subcommand"). `--loud` only,
+ *     and only once the primary `hook` call already succeeded: older prints
+ *     exactly one upgrade line to STDERR (never stdout — that channel is
+ *     asserted directly, since a SessionStart hook's stdout becomes
+ *     additionalContext, not a guaranteed user-facing banner); equal and
+ *     newer are silent; a `--version` output that doesn't parse as this
+ *     CLI's real shape (bare `N.N.N`) is UNKNOWN — reported once, never
+ *     treated as "too old". Quiet mode never even spawns `--version`. A
+ *     dedicated test proves the two old-CLI mechanisms are disjoint: a CLI
+ *     with no `hook` at all never reaches the version check, even though it
+ *     would also fail `--version`.
  *   - hooks/hooks.json wiring: every one of the 10 hook commands routes
  *     through the shim and invokes `hook <name>` for one of the five real
  *     relays (no bare `bun ` and no `.ts` path survives), and --loud appears
@@ -429,6 +442,171 @@ describe.skipIf(!SH)('run-hook.sh vs. an out-of-date CLI (plugin-thin release bl
     const r = run(['plan', '--json'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
     expect(r.status).toBe(2);
     expect(readLog(log)).toEqual(['plan --json']); // exec'd, never probed
+  }, 15000);
+});
+
+// ---------------------------------------------------------------------------
+// minimum CLI version: hook-capable but still too old (plugin-thin B.2)
+//
+// THE GENUINELY UNCOVERED CASE, in one sentence: a CLI that DOES answer
+// `hook` (so the mechanism above never fires — `hook --help` succeeds) can
+// still be older than what this plugin's skills/agents assume. run-hook.sh
+// declares MIN_CLI_VERSION and compares `pipeline --version` against it, but
+// ONLY on the --loud SessionStart entry, and ONLY once the primary `hook`
+// call has already succeeded — which structurally keeps this mechanism
+// disjoint from the no-hook-subcommand one above (proven directly below,
+// not just argued: a CLI that refuses everything, `--version` included,
+// still prints exactly one line, not two).
+//
+// CHANNEL: every line here lands on STDERR, matching the not-installed and
+// no-hook-subcommand lines. stdout is asserted empty in the headline case —
+// Claude Code parses a hook's stdout, and a SessionStart hook's stdout is
+// what becomes additionalContext, so nothing here may leak into it.
+// ---------------------------------------------------------------------------
+
+/** A fake CLI that HAS `hook` — both `hook --help` and any `hook <name>`
+ *  relay call succeed — and reports a configurable, arbitrary `--version`
+ *  string. This is the shape the mechanism above can never classify (its
+ *  probe would also succeed), which is exactly the gap this stub exercises:
+ *  MIN_CLI_VERSION comparison, not hook-subcommand presence. */
+function mkStubVersionedCli(dir: string, log: string, versionOutput: string): void {
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, 'pipeline');
+  const escaped = versionOutput.replace(/'/g, `'\\''`);
+  const script = [
+    '#!/bin/sh',
+    `printf '%s\\n' "$*" >> '${log.replace(/\\/g, '/')}'`,
+    'if [ "$1" = "--version" ]; then',
+    `  printf '%s\\n' '${escaped}'`,
+    '  exit 0',
+    'fi',
+    'if [ "$1" = "hook" ] && [ "$2" = "--help" ]; then',
+    "  printf 'pipeline hook <name>\\n'",
+    '  exit 0',
+    'fi',
+    "printf 'RELAY-OK\\n'",
+    'exit 0',
+    '',
+  ].join('\n');
+  writeFileSync(p, script);
+  chmodSync(p, 0o755);
+}
+
+describe.skipIf(!SH)('run-hook.sh minimum CLI version (B.2: hook-capable but too old)', () => {
+  test('older than MIN_CLI_VERSION, --loud: exactly ONE line, on STDERR (not stdout-to-context), naming the upgrade command', () => {
+    const dir = mkTmp('shim-minver-older-');
+    const pathDir = join(dir, 'pathdir');
+    const log = join(dir, 'calls.log');
+    mkStubVersionedCli(pathDir, log, '0.1.0'); // below any real MIN_CLI_VERSION
+    const r = run(['--loud', 'hook', 'session-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
+    expect(r.status).toBe(0); // never blocks the session
+    expect(r.stdout).not.toContain('pipeline plugin:'); // the channel: NOT stdout-to-context
+    const lines = r.stderr.split('\n').filter((l) => l.includes('pipeline plugin:'));
+    expect(lines.length).toBe(1); // exactly one line
+    expect(lines[0]).toContain('older');
+    expect(lines[0]).toContain('0.1.0');
+    expect(lines[0]).toContain('@baizor/pipeline');
+    expect(lines[0]).toContain('bun add -g');
+  }, 15000);
+
+  test('older than MIN_CLI_VERSION, quiet (every hook except the primary SessionStart entry): silent, and --version is never even spawned', () => {
+    const dir = mkTmp('shim-minver-older-quiet-');
+    const pathDir = join(dir, 'pathdir');
+    const log = join(dir, 'calls.log');
+    mkStubVersionedCli(pathDir, log, '0.1.0');
+    const r = run(['hook', 'analytics-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('RELAY-OK\n');
+    expect(r.stderr).toBe('');
+    expect(readLog(log)).toEqual(['hook analytics-relay']); // no --version spawn on the hot path
+  }, 15000);
+
+  test('equal to MIN_CLI_VERSION, --loud: silence (current, not "too old")', () => {
+    const dir = mkTmp('shim-minver-equal-');
+    const pathDir = join(dir, 'pathdir');
+    const log = join(dir, 'calls.log');
+    const src = readFileSync(SCRIPT, 'utf-8');
+    const minVersion = /MIN_CLI_VERSION="([0-9.]+)"/.exec(src)?.[1];
+    if (!minVersion) throw new Error('could not read MIN_CLI_VERSION out of run-hook.sh');
+    mkStubVersionedCli(pathDir, log, minVersion);
+    const r = run(['--loud', 'hook', 'session-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('RELAY-OK\n');
+    expect(r.stderr).toBe('');
+  }, 15000);
+
+  test('newer than MIN_CLI_VERSION, --loud: silence', () => {
+    const dir = mkTmp('shim-minver-newer-');
+    const pathDir = join(dir, 'pathdir');
+    const log = join(dir, 'calls.log');
+    mkStubVersionedCli(pathDir, log, '99.0.0');
+    const r = run(['--loud', 'hook', 'session-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe('');
+  }, 15000);
+
+  test('malformed --version output, --loud: treated as unknown — not "too old", not silently ignored, reported exactly once', () => {
+    const dir = mkTmp('shim-minver-malformed-');
+    const pathDir = join(dir, 'pathdir');
+    const log = join(dir, 'calls.log');
+    mkStubVersionedCli(pathDir, log, 'not-a-version');
+    const r = run(['--loud', 'hook', 'session-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
+    expect(r.status).toBe(0); // unknown must never block
+    const lines = r.stderr.split('\n').filter((l) => l.includes('pipeline plugin:'));
+    expect(lines.length).toBe(1); // said once, not silently swallowed
+    expect(lines[0]).not.toContain('is older'); // not a false "too old" accusation
+    expect(lines[0]).toContain('could not read');
+  }, 15000);
+
+  test('a CLI with `hook` but NO `--version` support at all: also treated as unknown, not "too old"', () => {
+    // A degenerate but real-world-plausible shape: the probe and the relay
+    // both succeed, but --version itself is an unrecognised subcommand.
+    const dir = mkTmp('shim-minver-noversion-');
+    const pathDir = join(dir, 'pathdir');
+    const p = join(pathDir, 'pipeline');
+    mkdirSync(pathDir, { recursive: true });
+    const script = [
+      '#!/bin/sh',
+      'if [ "$1" = "hook" ] && [ "$2" = "--help" ]; then',
+      "  printf 'pipeline hook <name>\\n'",
+      '  exit 0',
+      'fi',
+      'if [ "$1" = "hook" ]; then',
+      "  printf 'RELAY-OK\\n'",
+      '  exit 0',
+      'fi',
+      "printf \"pipeline: unknown command '%s'\\n\" \"$1\" >&2",
+      'exit 2',
+      '',
+    ].join('\n');
+    writeFileSync(p, script);
+    chmodSync(p, 0o755);
+    const r = run(['--loud', 'hook', 'session-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
+    expect(r.status).toBe(0);
+    const lines = r.stderr.split('\n').filter((l) => l.includes('pipeline plugin:'));
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain('could not read');
+  }, 15000);
+
+  test('the two old-CLI mechanisms are mutually exclusive: a CLI with NO hook subcommand at all never reaches the version check, even though it would also fail --version', () => {
+    // mkStubOldCli refuses EVERY subcommand, including --version — so if the
+    // ordering guard in run-hook.sh ever regressed (running the version
+    // check before, or independent of, the hook success branch), this would
+    // start printing TWO "pipeline plugin:" lines instead of one, which would
+    // also break the pinned "OLD CLI, --loud" test above. Re-asserted here
+    // from the version-check side for the same invariant.
+    const dir = mkTmp('shim-minver-disjoint-');
+    const pathDir = join(dir, 'pathdir');
+    const log = join(dir, 'calls.log');
+    mkStubOldCli(pathDir, log);
+    const r = run(['--loud', 'hook', 'session-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
+    expect(r.status).toBe(0);
+    const lines = r.stderr.split('\n').filter((l) => l.includes('pipeline plugin:'));
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain('too old');
+    expect(lines[0]).not.toContain('could not read');
+    expect(lines[0]).not.toContain('is older than this plugin needs');
+    expect(readLog(log).some((l) => l.startsWith('--version'))).toBe(false); // never spawned
   }, 15000);
 });
 
