@@ -79,14 +79,14 @@ Deliberately NOT renamed, for reasons that outlive the rename:
 
 ### Envelope-level kv overrides on `pipeline event`
 
-> The runtime event emitter is the `pipeline event` command (`apps/pipeline-cli/src/lib/event.ts`, run with Bun). Everything below describes its semantics.
+> The runtime event emitter is the installed `pipeline event` command (part of the standalone `@baizor/pipeline` CLI — see `docs/cli.md`). Everything below describes its semantics.
 
 The skill (`/pipeline:run`) passes `run_id`, `parent_run_id`, and `session_id` as **k=v arguments** on every `pipeline event` call, rather than relying on environment variables. Claude Code's Bash tool does not preserve shell state across invocations: a `export PIPELINE_RUN_ID=…` in one Bash call is gone by the next Bash call's `pipeline event …`, which would stamp `run_id: null` on every event after the first and silently drop the run from the UI's fold (events with `run_id: null` are not folded into the run forest).
 
 `pipeline event` pops these three names out of the kv payload and uses them as envelope fields:
 
 ```bash
-bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" event iteration.started \
+pipeline event iteration.started \
     run_id=abc123def456 \
     iteration_path=/abs/path/to/02-foo.md \
     index=2

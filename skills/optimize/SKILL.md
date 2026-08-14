@@ -28,7 +28,7 @@ which only the user can trigger (`disable-model-invocation: true`). Keep the pas
 ## Procedure
 
 1. **Refresh + load the summary.** Run
-   `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" stats` from the project root and read
+   `pipeline stats` from the project root and read
    its output (it regenerates and prints `SUMMARY.md`). If it reports no measurements, say so and
    stop — nothing to optimize.
 
@@ -60,7 +60,7 @@ which only the user can trigger (`disable-model-invocation: true`). Keep the pas
      once and succeeding on the retry with no pattern across runs. Report it, but do NOT "fix"
      noise by editing the pipeline.
    If needed, check leftover feedback (`<pipeline>/.feedback/`) and design-time lint
-   (`bun … plan --root <pipeline> --json` → `warnings`). Form ONE concrete improvement hypothesis
+   (`pipeline plan --root <pipeline> --json` → `warnings`). Form ONE concrete improvement hypothesis
    per pipeline: e.g. "step 03 halts on a missing preflight — add it to Steps", "step 02 fails
    `bun test` 5× per run because Steps says `bun test` but this repo needs `bun run test` — fix
    the command", "step 02 doubled in tokens — compact via replace-don't-append", "extract the

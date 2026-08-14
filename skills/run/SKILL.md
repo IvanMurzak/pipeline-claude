@@ -40,10 +40,10 @@ loop lives* and *what executes one step*:
 `driver` and `standalone` are easy to conflate because they share one loop and
 differ only in the executor; do not confuse either with `pipeline drive`, which
 is the command name for the `driver` path, not a synonym for the mode.
-**This bundled CLI implements `session`, `manager`, and `driver`** — v1
+**The `pipeline` CLI implements `session`, `manager`, and `driver`** — v1
 pipelines spell `driver` as `runner: headless` in `PIPELINE.md` frontmatter (see
 below); `standalone` and a `pipeline.yml`-level `runner:` key belong to the
-same four-mode design but are not wired into this bundled copy yet, so do not
+same four-mode design but are not wired into the CLI yet, so do not
 tell a user either will run today.
 
 **Resolve `runner:` alongside the `model:` read at Procedure step 3.** In a v2 pipeline it is a top-level key in `pipeline.yml` — `Grep` `^runner:` there, which reads one line and never opens a step file; in v1 it is `PIPELINE.md` frontmatter, already inside the ≤50 lines you read for `model:`. **Absent or unreadable ⇒ `manager`**, today's behaviour and the deliberate default (E10). A value that *is* declared but has no branch below still runs `manager` — but **say so in one line before you start**, because a mode the manifest did not declare is a mode the author did not choose. Never infer the mode from chain length: an invisible threshold makes one command behave two ways.
@@ -56,10 +56,10 @@ That file carries the two preflight refusals this mode needs (a CLI too old for 
 
 ### `runner: headless` (v1) — the `driver` mode
 
-When the pipeline is v1 and the `PIPELINE.md` frontmatter you read for `model:` also carries `runner: headless` (v1's spelling of the `driver` mode — see the table above), do NOT spawn a `pipeline-manager`. Instead run the bundled driver as a background process and supervise it:
+When the pipeline is v1 and the `PIPELINE.md` frontmatter you read for `model:` also carries `runner: headless` (v1's spelling of the `driver` mode — see the table above), do NOT spawn a `pipeline-manager`. Instead run the driver as a background process and supervise it:
 
 ```bash
-bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" drive \
+pipeline drive \
   --root "<pipeline_root>" --run-id "<run_id>" [--start "<step-name>"] \
   --default-model "<pipeline_default_model-or-null>" \
   [--default-effort "<level-or-null>"] \
@@ -92,25 +92,25 @@ A pipeline and each iteration may also opt into a **reasoning effort** via the O
 
 You emit the **run-level lifecycle** to `<project>/.pipeline/.runtime/events.jsonl`; the per-iteration events (`iteration.*`, `improver.*`, `script_creator.*`, `worktree.*`) are auto-emitted in-process by the `pipeline next` CLI the manager drives (the manager itself emits only the retrospective's improver/script events). Because the whole run shares one `session_id`, the mirror binding you register below is what lets the analytics hook correlate the manager's and step-executors' tool calls to this run. Emissions are best-effort — never let a failure halt the run.
 
-**One-time setup at the start of the Procedure:** mint the run id by calling the CLI — never generate one yourself or invent a format: `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" id`. Capture the literal value it prints (a UUIDv7, e.g. `019fc762-5762-7000-a9bf-922ed8fa00be`).
+**One-time setup at the start of the Procedure:** mint the run id by calling the CLI — never generate one yourself or invent a format: `pipeline id`. Capture the literal value it prints (a UUIDv7, e.g. `019fc762-5762-7000-a9bf-922ed8fa00be`).
 
 **CRITICAL — pass `run_id` literally on every writer call.** Claude Code's Bash tool does not preserve shell state between invocations, so an exported env var does not reach the next `pipeline event` call. Pass `run_id=<the-literal-id>` as a k=v argument on EVERY call. k=v args have no spaces around `=`; single-quote a value containing spaces.
 
-**Emission helper** (run with Bun, silent on success, exits 0 even on failure — do not check output):
+**Emission helper** (silent on success, exits 0 even on failure — do not check output):
 
 ```bash
-bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" event <event-type> run_id=<literal-id> [k=v ...]
+pipeline event <event-type> run_id=<literal-id> [k=v ...]
 ```
 
 **What you emit (one call per bullet):**
 
 - **On `--resume`, this whole list does not apply** — the Resume Procedure emits only `write-liveness` + `register-mirror-binding` for the EXISTING run_id, and never `pipeline.started` (re-entering a run is not starting one). See "Resume Procedure".
 - After the banner: `pipeline.started run_id=<id> pipeline_name=<name> first_iteration_path=<abs> pipeline_root=<abs> default_model=<model-or-null>` — `default_model` is `pipeline_default_model` (an alias `haiku`/`sonnet`/`opus`/`fable`, a canonical `claude-*` id, or literal `null`).
-- Immediately after `pipeline.started`, write the **liveness lockfile** so a reader can tell this run died without a terminal event: `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" event write-liveness run_id=<id> pid=$PPID` (PowerShell: `pid=$PID`). Pass the OS pid of the process **driving** this supervisor — `$PPID` is the best portable handle for the persistent Claude session. The daemon only auto-retires a run when this pid is a real, dead process, so an untrustworthy value is a safe no-op.
-- Immediately after, register the **mirror binding** so the analytics hook can resolve which run this session's events belong to: `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" event register-mirror-binding run_id=<id> pipeline_name=<name> iteration_path=<abs-first-iteration>`. Idempotent; silent on success. If `CLAUDE_SESSION_ID` is unset it writes `session_id=null`, and hook events fall back to `run_id: null`.
+- Immediately after `pipeline.started`, write the **liveness lockfile** so a reader can tell this run died without a terminal event: `pipeline event write-liveness run_id=<id> pid=$PPID` (PowerShell: `pid=$PID`). Pass the OS pid of the process **driving** this supervisor — `$PPID` is the best portable handle for the persistent Claude session. The daemon only auto-retires a run when this pid is a real, dead process, so an untrustworthy value is a safe no-op.
+- Immediately after, register the **mirror binding** so the analytics hook can resolve which run this session's events belong to: `pipeline event register-mirror-binding run_id=<id> pipeline_name=<name> iteration_path=<abs-first-iteration>`. Idempotent; silent on success. If `CLAUDE_SESSION_ID` is unset it writes `session_id=null`, and hook events fall back to `run_id: null`.
 - On `status: completed`: `pipeline.completed run_id=<id> pipeline_name=<name>`.
 - On `status: halted` / `depth-exhausted` (or any unrecoverable stop): `pipeline.halted run_id=<id> pipeline_name=<name> iteration_path=<abs> halt_reason=<short>`.
-- On loop exit (**either** outcome), after the terminal event, clear the lockfile: `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" event clear-liveness run_id=<id>`. A cleanly-finished run leaves no lockfile; only a crash/kill leaves a stale one (dead pid), which is the hard-kill signal.
+- On loop exit (**either** outcome), after the terminal event, clear the lockfile: `pipeline event clear-liveness run_id=<id>`. A cleanly-finished run leaves no lockfile; only a crash/kill leaves a stale one (dead pid), which is the hard-kill signal.
 
 The writer pops `run_id`, `parent_run_id`, and `session_id` out of the kv args and uses them as envelope fields, so those names are reserved — do not use them as data-field names.
 
@@ -207,7 +207,7 @@ Triggered by step 1 when the invocation is `--resume` (list candidates) or `--re
 2. **Without an id** (bare `--resume`): discover candidates, then ask — this is the ONLY branch that reads more than one `next.json`.
    - `Glob` `./.pipeline/*/.runtime/*/next.json`. For each match, `Read` the file (a small orchestration-cursor JSON, not iteration content) and keep it only when it parses AND `phase !== "terminal"`.
    - No non-terminal candidates → tell the user there is nothing to resume and suggest starting fresh (`/pipeline:run ./.pipeline/<pipeline>`). Stop.
-   - One or more candidates → list them, one line each: `<pipeline-name> · <run_id> · currently at <current_step_id or current_path> · <phase>` (append `(blocked on an external delegation — resuming will re-attempt this iteration)` when `phase === "blocked"`, so the user can choose knowingly). Optionally cross-reference the `.stats` SUMMARY "In-flight or crashed runs" section (`bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" stats`) to add a human-friendly "idle for Nh" hint — informational only, never filtering. Ask the user which to resume, or whether to start fresh instead. **This ask is user step 1 of the ≤2-step budget.**
+   - One or more candidates → list them, one line each: `<pipeline-name> · <run_id> · currently at <current_step_id or current_path> · <phase>` (append `(blocked on an external delegation — resuming will re-attempt this iteration)` when `phase === "blocked"`, so the user can choose knowingly). Optionally cross-reference the `.stats` SUMMARY "In-flight or crashed runs" section (`pipeline stats`) to add a human-friendly "idle for Nh" hint — informational only, never filtering. Ask the user which to resume, or whether to start fresh instead. **This ask is user step 1 of the ≤2-step budget.**
    - On the user's answer (step 2): if they chose to start fresh, stop this flow and use the ordinary Procedure (step 1 onward) instead. If they chose a candidate, you already have its `next.json` content from this pass — skip the re-`Read` in step 3 and continue at step 4 with that id and state.
 
 3. **Load and validate `next.json`** (skip when step 2 already read it): `Read` `<matched-path>`.
@@ -223,7 +223,7 @@ Triggered by step 1 when the invocation is `--resume` (list candidates) or `--re
    ▶ Resuming pipeline <pipeline-name> (run <run_id>)
    ```
 
-   `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" event write-liveness run_id=<run_id> pid=$PPID` (PowerShell: `pid=$PID`), then `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" event register-mirror-binding run_id=<run_id> pipeline_name=<pipeline_name> iteration_path=<current_iteration>`.
+   `pipeline event write-liveness run_id=<run_id> pid=$PPID` (PowerShell: `pid=$PID`), then `pipeline event register-mirror-binding run_id=<run_id> pipeline_name=<pipeline_name> iteration_path=<current_iteration>`.
 
 6. **Join the ordinary Procedure at step 5.1**, with `current_iteration` and `partial_work_note = null` set from step 4 above, and `run_id` = the EXISTING id (never regenerated). Use the `<if this invocation came from the Resume Procedure>` block in the 5.1 spawn-prompt template so the manager's first `pipeline next` call uses `--resume`. From there, 5.2/5.3 and step 6 of the Procedure are unchanged — including that a resumed run's `.stats` buffer finalizes normally on completion (the idempotent finalize guard is per-run-id, and this run was never finalized while dead — 08.3, 01§3.4).
 
@@ -239,7 +239,7 @@ Brief fields: `parent_task_repo`, `parent_task_issue`, `parent_branch`, `parent_
    gh issue create --repo <blocker_target_repo> --title "<new_issue_title>" --body "<new_issue_body>"
    ```
 
-   Record `blocker_issue_number` and `blocker_issue_url`. If a `--label` fails because the label doesn't exist, drop it and retry. Mint `child_run_id` for the child run the same way as the top-level run id — `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" id` — never invent a format. Emit `blocker.delegated run_id=<id> parent_iteration_path=<abs> blocker_issue_url=<url> child_run_id=<child-id> blocker_target_repo=<owner/repo>`.
+   Record `blocker_issue_number` and `blocker_issue_url`. If a `--label` fails because the label doesn't exist, drop it and retry. Mint `child_run_id` for the child run the same way as the top-level run id — `pipeline id` — never invent a format. Emit `blocker.delegated run_id=<id> parent_iteration_path=<abs> blocker_issue_url=<url> child_run_id=<child-id> blocker_target_repo=<owner/repo>`.
 
 2. **Back-link the parent's tracking issue** (skip when `parent_task_issue` is empty):
 
