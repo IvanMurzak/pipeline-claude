@@ -49,6 +49,20 @@ not. Version skew exits 0 (with one actionable upgrade line under `--loud`); a
 relay that genuinely failed still propagates its exit code, because a
 PreToolUse deny is a correct non-zero exit and must not be swallowed.
 
+**A CLI that IS new enough to answer `hook` can still be too old** — that
+probe only proves the subcommand exists, not that it does everything a skill
+now assumes (`runner: session`'s `pipeline next --brief-file` preflight above
+is the same idea, generalized). `run-hook.sh` declares one `MIN_CLI_VERSION`
+constant (plugin.json's schema has no field for an external prerequisite —
+T-CLI-1 — so this is the single place the floor lives) and compares it against
+`pipeline --version`, `--loud` only, and only once the primary `hook` call has
+already succeeded — which keeps this check and the one above structurally
+disjoint; a CLI old enough to fail the `hook --help` probe never reaches this
+one. Too old → one stderr line naming the upgrade command, the same channel
+the two lines above already use; current or newer → silence; a `--version`
+output that doesn't parse as the CLI's real shape (a bare `N.N.N`) → reported
+once as unknown, never as "too old".
+
 **Write scope with respect to the consumer project: STRICTLY inside
 `<project>/.pipeline/`.** The hooks only ever append to `.runtime/events.jsonl`
 (plus the per-user bindings journal under `~/.claude/pipeline-ui/`). They never
