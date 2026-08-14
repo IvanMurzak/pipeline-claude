@@ -1,6 +1,6 @@
 ---
 name: clone
-description: Scaffold a ready-made pipeline into this project by copying a bundled template into ./.pipeline/<name>/. Use to bootstrap a working pipeline (e.g. support-answer, ship-feature, example-minimal) without authoring one from scratch. Also lists the available templates with --list.
+description: Scaffold a ready-made pipeline into this project by copying a template that ships with the installed pipeline CLI into ./.pipeline/<name>/. Use to bootstrap a working pipeline (e.g. support-answer, ship-feature, example-minimal) without authoring one from scratch. Also lists the available templates with --list.
 user-invocable: true
 allowed-tools: Bash
 argument-hint: <template-name>  (or --list to see all)
