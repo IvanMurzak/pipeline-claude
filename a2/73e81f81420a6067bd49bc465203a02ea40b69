@@ -1,0 +1,25 @@
+skills/optimize/SKILL.md
+  s_303d0d7286eb57::t_b10876a32a5916 63
+agents/pipeline-manager.md
+  s_303d0d7286eb57::t_1eb2efdb16d138 11
+skills/clone/SKILL.md
+  s_303d0d7286eb57::t_fccb95fc06e350 3
+docs/events.md
+  s_303d0d7286eb57::t_97954a9a88b0f0 82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "a273e81f81420a6067bd49bc465203a02ea40b69",
+  "prompts": {},
+  "sessions": {
+    "s_303d0d7286eb57": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ccf91804-9560-4674-84cf-ff47468a24e8",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
