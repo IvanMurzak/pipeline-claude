@@ -73,7 +73,7 @@
 
 import { describe, test, expect, afterAll } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, rmSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -263,6 +263,61 @@ describe.skipIf(!SH)('run-hook.sh resolution chain (sh: ' + (SH ?? 'unavailable 
     const r = run([], { PATH: pathDir, HOME: join(dir, 'unused-home') });
     expect(r.status).toBe(0);
     expect(r.stdout).toBe(''); // the stub was never invoked
+  }, 15000);
+});
+
+// ---------------------------------------------------------------------------
+// T-CLI-2 / plugin-thin `v1`: the happy path with a REAL Windows .exe, not a
+// POSIX-shebang stub.
+//
+// Every stub above (`mkStubPipeline` et al.) plants a plain `#!/bin/sh`
+// script named `pipeline` with NO extension. That proves the probe ORDER,
+// but on Windows it does not exercise the one platform-specific claim this
+// shim's own header comment makes and that plugin-thin `p6` said was
+// "verified, not assumed": that the MSYS `sh` Claude Code spawns for hooks
+// resolves a bare `pipeline` (typed with no extension, exactly as
+// `command -v pipeline` and `run-hook.sh`'s own candidates do) to the REAL
+// `pipeline.exe` that `bun add -g` / `npm i -g` actually place on disk —
+// because an extensionless POSIX-shebang script happens to run the same way
+// on every platform and so never touches Windows' PE-vs-extensionless-name
+// resolution at all. This block closes that gap with a genuine compiled
+// Windows executable (the `bun.exe` already on PATH for this very test run —
+// no network fetch, nothing installed) renamed to `pipeline.exe`, placed at
+// candidates 1 and 3 of the real probe order. Windows-only: the claim being
+// tested does not exist on macOS/Linux.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(process.platform !== 'win32' || !SH)('run-hook.sh resolves a REAL .exe, not just a POSIX-shebang script (T-CLI-2 happy path)', () => {
+  test('candidate 1 (PATH): `pipeline` typed with no extension resolves to a real pipeline.exe PE binary', () => {
+    const bunPath = Bun.which('bun');
+    if (!bunPath) throw new Error('bun not resolvable on PATH — no real .exe available to source for this test');
+    const dir = mkTmp('shim-real-exe-path-');
+    const pathDir = join(dir, 'pathdir');
+    mkdirSync(pathDir, { recursive: true });
+    copyFileSync(bunPath, join(pathDir, 'pipeline.exe'));
+    // Non-`hook` shape: run-hook.sh `exec`s straight through to the resolved
+    // binary, so a real, successful, non-127 exit proves candidate 1 found
+    // and ran the `.exe` despite the extensionless argv/PATH lookup.
+    const r = run(['--version'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
+    expect(r.status).not.toBe(127); // 127 is `sh`'s own "command not found"
+    expect(r.stderr).not.toContain('not found');
+    expect(r.stdout.trim().length).toBeGreaterThan(0); // the real binary answered `--version`
+  }, 15000);
+
+  test('candidate 3 (~/.bun/bin): the same real .exe, at the actual default bun global-install location', () => {
+    const bunPath = Bun.which('bun');
+    if (!bunPath) throw new Error('bun not resolvable on PATH — no real .exe available to source for this test');
+    const dir = mkTmp('shim-real-exe-home-');
+    const emptyPath = join(dir, 'empty');
+    mkdirSync(emptyPath, { recursive: true });
+    const home = join(dir, 'home');
+    const bunBin = join(home, '.bun', 'bin');
+    mkdirSync(bunBin, { recursive: true });
+    copyFileSync(bunPath, join(bunBin, 'pipeline.exe'));
+    const r = run(['--version'], { PATH: emptyPath, HOME: home }); // BUN_INSTALL intentionally absent
+    expect(r.status).not.toBe(127);
+    expect(r.stderr).not.toContain('not found');
+    expect(r.stdout.trim().length).toBeGreaterThan(0);
   }, 15000);
 });
 
