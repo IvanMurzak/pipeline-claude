@@ -86,7 +86,7 @@ The skill (`/pipeline:run`) passes `run_id`, `parent_run_id`, and `session_id` a
 `pipeline event` pops these three names out of the kv payload and uses them as envelope fields:
 
 ```bash
-bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" event iteration.started \
+pipeline event iteration.started \
     run_id=abc123def456 \
     iteration_path=/abs/path/to/02-foo.md \
     index=2

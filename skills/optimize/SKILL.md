@@ -28,7 +28,7 @@ which only the user can trigger (`disable-model-invocation: true`). Keep the pas
 ## Procedure
 
 1. **Refresh + load the summary.** Run
-   `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" stats` from the project root and read
+   `pipeline stats` from the project root and read
    its output (it regenerates and prints `SUMMARY.md`). If it reports no measurements, say so and
    stop — nothing to optimize.
 

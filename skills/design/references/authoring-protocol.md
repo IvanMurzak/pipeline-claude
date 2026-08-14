@@ -312,7 +312,7 @@ Iteration files are read by a fresh-context executor on every run, so every line
 
 **Script conventions:** when you write a script as part of designing a new pipeline (whether called from inside an agent step — this principle — or as the whole `type: script` step of Principle 10), follow the conventions in `${CLAUDE_PLUGIN_ROOT}/agents/pipeline-script-creator.md` — pathlib for paths, stdlib only by default, argparse + `--help`, exit codes documented, idempotent, cross-platform, and a stdlib-`unittest` test file under `scripts/tests/` (a script is software; it ships with tests). Read that file once at the start of a design session if you anticipate any extractions; its rules are mandatory whenever you, the improver, or the script-creator agent author a script in this system.
 
-**Don't script what the CLI already ships:** a step that must wait for GitHub CI (on a PR or a branch) uses the bundled gate — `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" ci-wait --pr <n> --json` — ONE blocking call that fails fast on the first failed check, times out on stuck CI, and prints one compact result (exit 0 passed / 1 failed / 3 timeout / 4 no checks). Never author a sleep-and-poll loop (or a poll script) for CI in a `Steps` block.
+**Don't script what the CLI already ships:** a step that must wait for GitHub CI (on a PR or a branch) uses the CLI's built-in gate — `pipeline ci-wait --pr <n> --json` — ONE blocking call that fails fast on the first failed check, times out on stuck CI, and prints one compact result (exit 0 passed / 1 failed / 3 timeout / 4 no checks). Never author a sleep-and-poll loop (or a poll script) for CI in a `Steps` block.
 
 **Iteration shape with an extraction:**
 

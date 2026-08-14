@@ -14,7 +14,7 @@ Given a task description (or GitHub issue ref) in `$1`, select the best-matching
 
 This skill is engineered so most calls cost near-zero LLM tokens. Each call walks down a ladder; you stop at the first tier that produces a usable answer.
 
-1. **Deterministic match (free).** Always runs first. Shells out to the `pipeline match` command (`apps/pipeline-cli`, run with Bun) that scores manifests with Okapi BM25 over the positive corpus and hard-filters on `Scope.Out`. Returns ranked JSON. ~zero LLM tokens. Most tasks resolve here.
+1. **Deterministic match (free).** Always runs first. Shells out to the `pipeline match` command that scores manifests with Okapi BM25 over the positive corpus and hard-filters on `Scope.Out`. Returns ranked JSON. ~zero LLM tokens. Most tasks resolve here.
 2. **LLM disambiguation (cheap, Haiku).** Only when the matcher returns 2+ candidates with **comparable** scores (top1/top2 ratio < 2.0). Spawns the `pipeline-disambiguator` subagent (Haiku 4.5) with the task text and the 2–5 ambiguous candidates' manifests inlined. Tokens scale with ambiguity, not with project size — typically a few thousand tokens of Haiku, total cost is fractions of a cent.
 3. **LLM chain detection (expensive, Sonnet/main).** Only when the matcher returns 0 candidates AND the task contains chain phrasing (`then`, `after that`, `followed by`, etc.). Loads every project manifest into your context and reasons over them to produce a chain. This is the only path that costs what dispatch used to cost on every call before the refactor — now it runs maybe 5% of the time.
 
@@ -40,7 +40,7 @@ The 80% case (one pipeline obviously matches): tier 1 only, no LLM tokens. The 1
 
 - `$1` is non-empty. If empty, ask the user what task to dispatch. Do not proceed.
 - Current working directory is the consumer project's root.
-- `bun` is on PATH — the matcher runs via the bundled `pipeline` CLI (`apps/pipeline-cli`). Bun is already required by the plugin's hooks.
+- The `pipeline` CLI is installed and on PATH (`@baizor/pipeline`; see `docs/running-pipelines.md`) — the matcher runs through it.
 - For `--issue` inputs only: `gh` CLI installed and authenticated.
 - At least one pipeline exists under `./.pipeline/`. If none, stop and tell the user to run `/pipeline:design` first.
 
@@ -59,10 +59,10 @@ For the issue cases, you do NOT need to call `gh` yourself — `the matcher` acc
 
 ### Step 2 — Run the deterministic matcher (tier 1)
 
-Invoke the bundled matcher (the `pipeline` CLI, run with Bun):
+Invoke the matcher (`pipeline match`):
 
 ```bash
-bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" match \
+pipeline match \
   --pipelines-dir "./.pipeline" \
   --task "<verbatim task text>"     # OR --issue "<issue ref>"
   --top 5

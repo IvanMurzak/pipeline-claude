@@ -67,7 +67,7 @@ You may do all of it with a single Bash call, e.g. (POSIX): `mkdir -p "<pipeline
 `pipeline next` is the orchestration engine. Every call prints ONE action as JSON and persists run state at `<pipeline_root>/.runtime/<run_id>/next.json`. The base command (always pass `--root`, `--run-id`, `--default-model`):
 
 ```bash
-bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" next \
+pipeline next \
   --root "<pipeline_root>" --run-id "<run_id>" --default-model "<pipeline_default_model-or-null>" \
   [--default-effort "<level-or-null>"] [--model "<step_id>=<model>" ...] \
   [--effort "<step_id>=<level>" ...] [--start "<step-name>"] [--resume] [--record '<json>']
@@ -216,10 +216,10 @@ The action is `{ "action": "retrospective" }`, optionally carrying `lint_warning
 
 This runs ONLY when `pipeline next` returns the `retrospective` action — i.e. once per run, after the chain reached `done` or `halt` (terminal `completed` / `halted` / `depth-exhausted`, NEVER `blocked-delegating`), and only when step-executors journaled at least one problem into `<pipeline_root>/.feedback/<run_id>/`. The empty-folder no-op is the CLI's job now (it simply doesn't emit the action), so you never have to gate it — but you still do the consolidation work here.
 
-**Retrospective UI events are YOURS to emit** — the whole retrospective is one `retrospective` action, so the CLI cannot see the improver/script-creator spawns inside it. Emission helper (run with Bun, silent on success, exits 0 even on failure — do not check its output):
+**Retrospective UI events are YOURS to emit** — the whole retrospective is one `retrospective` action, so the CLI cannot see the improver/script-creator spawns inside it. Emission helper (silent on success, exits 0 even on failure — do not check its output):
 
 ```bash
-bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" event <event-type> run_id=<literal-id> [k=v ...]
+pipeline event <event-type> run_id=<literal-id> [k=v ...]
 ```
 
 **CRITICAL — pass `run_id` literally on every call.** Claude Code's Bash tool does NOT preserve shell state between invocations, so `export`-ing the id does not reach the next call. Always write `run_id=<the actual id from your prompt, copied WHOLE>` as a literal k=v argument — never shorten it or reformat it (run ids are 36-character UUIDs; a truncated id names a run that does not exist). k=v args have no spaces around `=`; single-quote a value that contains spaces. The writer treats `null` / `true` / `false` / integers specially; everything else is a string.

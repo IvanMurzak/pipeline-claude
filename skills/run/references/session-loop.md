@@ -47,7 +47,7 @@ Both are cheap, and both fail *loudly*. A wrong answer here is not a degraded
 run, it is a run that looks fine and is not.
 
 1. **The CLI must support `--brief-file`.** Run
-   `bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" next --help` and
+   `pipeline next --help` and
    confirm the usage text names `--brief-file`. An older CLI **ignores unknown
    flags silently**, prints the full action instead of the control object, and
    your spawn would hand the executor an absent `brief_file`. If the flag is
@@ -93,7 +93,7 @@ Every call, first and last, carries `--brief-file` and the maximum Bash
 `timeout: 600000` — `type: script` steps execute *inside* the call.
 
 ```bash
-bun "${CLAUDE_PLUGIN_ROOT}/apps/pipeline-cli/src/cli.ts" next \
+pipeline next \
   --root "<pipeline_root>" --run-id "<run_id>" --default-model "<pipeline_default_model-or-null>" \
   [--default-effort "<level-or-null>"] [--model "<step_id>=<model>" ...] \
   [--effort "<step_id>=<level>" ...] [--start "<step-name>"] [--resume] \
