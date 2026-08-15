@@ -1,5 +1,24 @@
 # Claude-Pipeline — Roadmap / optional follow-ups
 
+> **⚠ HISTORICAL RECORD (2026-06). Its paths are no longer this repository's.**
+> Everything below is written in the past tense about work that shipped in
+> plugin `0.43.0 → 0.48.0`, and it is preserved as written rather than edited to
+> match today's tree — a dated record that is quietly rewritten stops being
+> evidence of anything.
+>
+> Two structures it names are **REMOVED** from this repository:
+>
+> - **`apps/pipeline-cli/`** — deleted in plugin-thin `p9`. The CLI is its own
+>   repository now, `github.com/IvanMurzak/pipeline`, published as
+>   `@baizor/pipeline` and installed by the user (`bun add -g @baizor/pipeline`).
+>   Read every `apps/pipeline-cli/…` path below as `<cli>/…` in that repository.
+> - **`apps/pipeline-ui/`, the local dashboard daemon, and `pipeline ui`** —
+>   deleted in plugin-thin `p3`. Follow-up 1 below describes a launcher for a
+>   thing that no longer exists.
+>
+> For what this repository contains TODAY — skills, agents, `hooks.json` and
+> `hooks/run-hook.sh`, and no code — see `CLAUDE.md`.
+
 Tracks **optional** work deferred after the 2026-06 CLI-consolidation + routing
 redesign. Both follow-ups below are now **DONE** (plugin `0.47.0 → 0.48.0`); the
 remaining open items are install-only validation gaps. Each item is

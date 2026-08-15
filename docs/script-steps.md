@@ -183,7 +183,7 @@ run's FROZEN `PP_*` map, alongside iteration/manifest body text.
 
 ## 3. The process I/O contract (FROZEN)
 
-> This contract is **FROZEN**: existing consumer scripts must keep working unmodified. If you change anything in this section, update `apps/pipeline-cli/src/lib/script-step.ts`, `apps/pipeline-cli/src/lib/script-types.ts`, `apps/pipeline-cli/src/commands/next.ts`, and this doc in lockstep, and bump the plugin version.
+> This contract is **FROZEN**: existing consumer scripts must keep working unmodified. If you change anything in this section, update `<cli>/src/lib/script-step.ts`, `<cli>/src/lib/script-types.ts`, `<cli>/src/commands/next.ts`, and this doc in lockstep, and bump the plugin version.
 
 The step is executed via the same `HOOK_RUNNER` wrapper used for worktree hooks (process-tree kill on timeout — no orphaned grandchildren).
 
