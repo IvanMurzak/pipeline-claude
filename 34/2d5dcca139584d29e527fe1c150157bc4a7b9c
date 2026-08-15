@@ -1,0 +1,71 @@
+ROADMAP.md
+  s_303d0d7286eb57::t_4b5ee438bc75a7 3-21
+CHANGELOG.md
+  s_303d0d7286eb57::t_4821292ebabfd0 3-41
+CLAUDE.md
+  s_303d0d7286eb57::t_d8e7ed77dd8faa 136,138-144,148,152-157,159,161-166,171-173
+  s_303d0d7286eb57::t_c1d2c6192e5b14 94
+  s_303d0d7286eb57::t_2ee195b5eb655c 179-189
+  s_303d0d7286eb57::t_288e4b426d9b04 23-32
+  s_303d0d7286eb57::t_cf0607a150382e 36
+tests/hook-run-shim.test.ts
+  s_303d0d7286eb57::t_44b5d2a8519a1e 371-376
+agents/pipeline-manager.md
+  s_303d0d7286eb57::t_7a2e49ea94c831 13
+  s_15ce51cd4b32b2::t_d1ea458a6e4d72 343
+.github/workflows/release-cli.yml
+  s_303d0d7286eb57::t_14c1ffd668d6c7 77,79
+  s_303d0d7286eb57::t_42190c0bce14e3 1,10,12-17,19-22,24-29,31-38,45,48,56,61,89,92-93,95,98-99,101,114-120,122-123,127
+.claude-plugin/plugin.json
+  s_303d0d7286eb57::t_27b408d040d875 3
+README.md
+  s_303d0d7286eb57::t_0baa1da4a4d798 964
+  s_303d0d7286eb57::t_e64384798b6945 548
+  s_303d0d7286eb57::t_aa8162c3670e8c 316
+  s_15ce51cd4b32b2::t_fed2f2b57ba20a 1235,1254
+docs/journal-and-hooks.md
+  s_303d0d7286eb57::t_ca27253f8e8918 100
+  s_15ce51cd4b32b2::t_98ebca9fd8bdb4 85,88,92-93,97,104
+.github/workflows/ci.yml
+  s_303d0d7286eb57::t_c8bf3ad568f400 64-68
+  s_303d0d7286eb57::t_62f2300da7ce21 80-85
+  s_303d0d7286eb57::t_3ce6fbe69336ed 26-37,39-44,52-55
+agents/step-executor.md
+  s_303d0d7286eb57::t_9bc868f21620be 443
+docs/cli.md
+  s_303d0d7286eb57::t_541d9b31ec3a35 7,21,36,38
+docs/departments-mcp.md
+  s_303d0d7286eb57::t_80e447bc8bb29c 4,93,103,124
+docs/events.md
+  s_303d0d7286eb57::t_1103d26c03ffa2 107,227,450,523
+docs/execution-modes.md
+  s_303d0d7286eb57::t_70907ccd96edb2 5,7,11,13,19
+docs/script-steps.md
+  s_303d0d7286eb57::t_480b3ac94b4b38 186
+docs/worktree-hook-contract.md
+  s_303d0d7286eb57::t_dce148b896cedd 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "342d5dcca139584d29e527fe1c150157bc4a7b9c",
+  "prompts": {},
+  "sessions": {
+    "s_15ce51cd4b32b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a5a8ca84afc54c3c4",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_303d0d7286eb57": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ccf91804-9560-4674-84cf-ff47468a24e8",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
