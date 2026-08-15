@@ -81,6 +81,32 @@ const PLUGIN_ROOT = resolve(import.meta.dir, '..');
 const SCRIPT = join(PLUGIN_ROOT, 'hooks', 'run-hook.sh');
 const SH = typeof Bun !== 'undefined' ? Bun.which('sh') : null;
 
+// ---------------------------------------------------------------------------
+// canary: every `describe.skipIf(!SH)` block below (the overwhelming
+// majority of this file's coverage) silently SKIPS, not fails, when `sh`
+// does not resolve — and this file's own README-style header documents that
+// as an intentional self-skip for a `sh`-less environment. That is correct
+// for a genuinely POSIX-sh-less machine, but wrong for the windows-latest CI
+// job specifically: that job is EXPECTED to have Git Bash's `sh` on PATH
+// (that's the whole point of running this suite there), so a future runner-
+// image change that quietly drops it from PATH would turn 28 of this file's
+// 34 tests into skips while the job stays green — exactly the failure shape
+// this task's own Fact-1 side-finding proved is real on a Windows machine
+// with a minimal PATH (26/30 skipped from a bare, non-Git-Bash PowerShell
+// process on this dev machine). This canary is unconditional (not
+// `skipIf`-gated) and scoped to `win32` + `CI` only, so it cannot fire on a
+// contributor's local sh-less machine or on the ubuntu job — only on the
+// runner this file's coverage actually depends on.
+// ---------------------------------------------------------------------------
+
+test('CI canary (win32 only): `sh` must resolve on the Windows CI runner, or the SH-gated suite above silently skips green instead of running', () => {
+  if (process.platform !== 'win32' || !process.env.CI) return;
+  expect(
+    SH,
+    'Bun.which("sh") returned null on a Windows CI runner: every describe.skipIf(!SH) block in this file just SKIPPED instead of running (28 of 34 tests). Fix the runner image/PATH (needs Git\\bin or Git\\usr\\bin reachable), not this test.'
+  ).not.toBeNull();
+});
+
 /** The subcommand names hooks.json is allowed to invoke. Restated here rather
  *  than imported: the CLI that implements them is a different repository and
  *  is not on disk in this checkout — which is exactly why the two-sided parity
@@ -99,10 +125,16 @@ const RELAYS = [
 const created: string[] = [];
 afterAll(() => {
   while (created.length) {
+    const dir = created.pop()!;
     try {
-      rmSync(created.pop()!, { recursive: true, force: true });
-    } catch {
-      // best-effort
+      rmSync(dir, { recursive: true, force: true });
+    } catch (err) {
+      // Best-effort, but surfaced rather than swallowed: some of these dirs
+      // carry a ~100MB copied `pipeline.exe` (the real-.exe tests below), and
+      // a silently-swallowed failure here (e.g. an AV hold, EBUSY on
+      // Windows) leaks that copy in %TEMP% instead of just failing loudly.
+      // Disk litter only, never a test failure — never affects PATH.
+      console.warn(`hook-run-shim.test.ts: afterAll cleanup failed to remove ${dir}:`, err);
     }
   }
 });
