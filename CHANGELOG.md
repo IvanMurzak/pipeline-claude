@@ -1,8 +1,44 @@
 # Changelog
 
-Notable changes to the `pipeline` Claude Code plugin and the `@baizor/pipeline` CLI it ships
-(they live in one repo and release together; version numbers are independent — see below).
-This file starts here; earlier history is in `git log`.
+Notable changes to the `pipeline` Claude Code plugin.
+
+**Entries below `0.97.0` also cover the `@baizor/pipeline` CLI, which used to live in this
+repository at `apps/pipeline-cli/` and released from it.** It does not any more — it is
+`github.com/IvanMurzak/pipeline` now, with its own changelog and its own `cli-v*` releases.
+Historical entries are left exactly as written; only this masthead is updated, because it
+describes the file rather than recording anything. Earlier history still is in `git log`.
+
+## plugin 0.97.0 — the embedded CLI copy is deleted; the plugin ships no code
+
+`apps/pipeline-cli/` is **gone** — 229 tracked files, the last of the pre-extraction copy.
+This repository is now exactly what `02-extract-cli.md` drew: skills, agents, `hooks.json`
+and `hooks/run-hook.sh`. No TypeScript, no `package.json`, no build.
+
+**Users with `@baizor/pipeline` installed should notice nothing.** The hooks stopped calling
+the embedded copy in `0.94.0` (`p6`/`p7` — every relay is a `pipeline hook <name>` subcommand
+resolved through `run-hook.sh`), and `0.96.0` added the `MIN_CLI_VERSION` SessionStart warning
+for a CLI too old to satisfy the skills. This release removes the code those two changes had
+already routed around. If you do **not** have the CLI installed, `run-hook.sh` says so with the
+install line, as it has since `0.93.0`: `bun add -g @baizor/pipeline`.
+
+Also in this release, all of it fallout from the delete rather than separate work:
+
+- **CI is two jobs, not three.** The `Pipeline CLI` matrix job left with the directory it ran
+  in; those suites run in `IvanMurzak/pipeline`'s own CI. `plugin-hooks` and
+  `manifest-validation` remain.
+- **The release workflow is plugin-only.** Its `cli` target built `@baizor/pipeline` from
+  `apps/pipeline-cli/`; that package is released from its own repository now, so the target and
+  the `target` input are removed. Nothing here publishes to npm any more, and `id-token: write`
+  went with it. The workflow FILE is still named `release-cli.yml` — see its header.
+- **`tests/cli-package-self-contained.test.ts` is deleted**, on its own written instruction. It
+  guarded that the CLI's tests reached nothing above the CLI package, which is what made this
+  delete safe; with the package gone it had nothing to guard, and its first assertion said so by
+  name. `tests/hook-run-shim.test.ts` stays and is now the only suite here.
+- **Docs sweep.** Source paths that used to read `apps/pipeline-cli/…` now read `<cli>/…`, the
+  notation this repo already used for the CLI's own repository. `README.md` no longer claims the
+  CLI is bundled or that there is "nothing to install beyond Bun" — there is; it is the CLI.
+  `ROADMAP.md` carries a historical banner instead of being rewritten, and `CHANGELOG.md`'s
+  own history is untouched.
 
 ## plugin 0.96.0 — SessionStart warns about a too-old (but hook-capable) CLI
 

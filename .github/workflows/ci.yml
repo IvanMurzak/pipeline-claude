@@ -23,39 +23,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  pipeline-cli:
-    name: Pipeline CLI (apps/pipeline-cli)
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: apps/pipeline-cli
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - name: Run unit tests
-        run: bun test tests/
-      - name: CLI smoke (version + Node bundle build)
-        run: |
-          bun src/cli.ts --version
-          bun run build
-
-  # ── The plugin's own tests (plugin-thin `p5`, narrowed by `p6`) ────────────
-  # `tests/` at the REPOSITORY ROOT covers what is genuinely THIS repository's
-  # and does not travel with the CLI.
+  # ── The plugin's own tests (plugin-thin `p5`, narrowed by `p6`, final in `p9`)
+  # `tests/` at the REPOSITORY ROOT covers what is genuinely THIS repository's.
+  # There is nothing else left to cover: this repository is now skills, agents,
+  # `hooks.json` and `run-hook.sh` — no code.
   #
-  # `p5` put thirteen hook suites here, beside the `hooks/*.ts` relays they
-  # covered. `p6` turned those relays into `pipeline hook <name>` subcommands
-  # in `IvanMurzak/pipeline`, and twelve of the thirteen went with them — a
-  # test lives in the tree that contains what it tests, and after the move that
-  # tree is the CLI's. They run there in the `Pipeline CLI` job, on the same
-  # two-OS matrix; that job's own header says so, because A RELOCATED TEST NO
-  # JOB RUNS IS A DELETED TEST.
+  # THE `Pipeline CLI` JOB WAS REMOVED HERE, with the `apps/pipeline-cli`
+  # directory it ran in (`p9`). It is not "missing"; the app it tested is in
+  # `IvanMurzak/pipeline` now, where that repository's own CI runs the same
+  # suites on the same two-OS matrix. A job kept pointing at a deleted
+  # directory does not fail loudly — `bun test tests/` in a `working-directory`
+  # that no longer exists is a setup error at best and a vacuous pass at worst,
+  # which is the failure this comment exists to prevent anyone re-creating.
+  #
+  # The history, because it explains the shape: `p5` put thirteen hook suites
+  # here, beside the `hooks/*.ts` relays they covered. `p6` turned those relays
+  # into `pipeline hook <name>` subcommands in `IvanMurzak/pipeline`, and twelve
+  # of the thirteen went with them — a test lives in the tree that contains what
+  # it tests. They run there, because A RELOCATED TEST NO JOB RUNS IS A DELETED
+  # TEST.
   #
   # What remains here is what `p6` deliberately did NOT move:
   #   • hook-run-shim.test.ts — `hooks/run-hook.sh` (which survives, resolving
@@ -63,13 +49,10 @@ jobs:
   #     through it, including the committed 100755 mode. Both files are this
   #     plugin's; moving their test to the CLI would have left it testing
   #     nothing.
-  #   • cli-package-self-contained.test.ts — the guard that `apps/pipeline-cli`
-  #     reaches nothing above itself, which is what makes deleting that
-  #     directory safe. It goes away with the directory, not before.
-  #
-  # This is still a SEPARATE job rather than a step in `pipeline-cli` above,
-  # for the original reason: when `apps/pipeline-cli` is finally deleted, that
-  # job leaves with it and this one must not.
+  #   • cli-package-self-contained.test.ts — REMOVED in `p9`. It guarded that
+  #     `apps/pipeline-cli` reached nothing above itself, which is what made
+  #     deleting that directory safe; it went away with the directory, exactly
+  #     as its own header and its first assertion instructed.
   #
   # NO ROOT `package.json`, DELIBERATELY. Claude Code installs a plugin by
   # cloning this repository — there is no install step, ever. A root manifest
@@ -78,11 +61,11 @@ jobs:
   # test runner that does not need it: `bun test` needs no manifest and no
   # install to run the directory it is started in. That is what this job does.
   #
-  # Both operating systems, because these are the files most exposed to the
-  # difference: `run-hook.sh` is POSIX sh (its resolution-chain block self-skips
-  # where `sh` is unavailable, while the `hooks.json` wiring assertions still
-  # run), and the daemon-lock tests turn on `wx` exclusive-create and real
-  # cross-process spawns.
+  # Both operating systems, because the file that remains is the one most
+  # exposed to the difference: `run-hook.sh` is POSIX sh, and its
+  # resolution-chain block self-skips where `sh` is unavailable while the
+  # `hooks.json` wiring assertions still run. Windows is where that skip — and
+  # the `pipeline` lookup the shim performs — actually gets exercised.
   plugin-hooks:
     name: Plugin hooks + shim (tests/)
     strategy:
@@ -94,10 +77,12 @@ jobs:
     # `bun test` is a FILE-NAME FILTER, not a directory scope — `bun test
     # --help` says so ("Run all test files with 'foo' or 'bar' in the file
     # name"). `bun test tests/` from the root therefore matched every path
-    # containing `tests/`, which is `apps/pipeline-cli/tests/` and the
-    # templates' suites too: the first run of this job executed 2427 tests
-    # across 119 files and duplicated the whole `pipeline-cli` job. Bun scans
-    # from its working directory, so scoping it means putting it there.
+    # CONTAINING `tests/`: when the CLI still lived here that was its whole
+    # suite plus the templates', and the first run of this job executed 2427
+    # tests across 119 files, duplicating an entire other job. The CLI is gone
+    # (`p9`) so there is less to collide with today, but the form is still
+    # wrong and stays fixed — bun scans from its working directory, so scoping
+    # it means putting it there, not passing a path.
     defaults:
       run:
         working-directory: tests

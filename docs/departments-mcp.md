@@ -1,7 +1,7 @@
 # Departments — remote MCP entry + background notifier
 
 Source: `department-mesh` design, task `a1` (`.claude-plugin/plugin.json`'s `mcpServers` entry +
-`apps/pipeline-cli/src/lib/department-notify.ts` / `src/lib/os-notify.ts` / `src/commands/department-notify.ts` +
+`<cli>/src/lib/department-notify.ts` / `src/lib/os-notify.ts` / `src/commands/department-notify.ts` +
 `<cli>/src/hooks/department-notifier-relay.ts`). Read this before editing any of those files.
 
 RENAME NOTE (a11, simplified-onboarding — 08-terminology.md / D10 / D31): this file was
@@ -90,7 +90,7 @@ transitions across sessions — so a parked task announces itself instead of wai
 
 This is the one deliberate, documented deviation from a literal reading of the design text (which names
 `tasks.list`/`tasks.wait` — the MCP tool names). The full reasoning lives in the header comment of
-`apps/pipeline-cli/src/lib/department-notify.ts`; the short version:
+`<cli>/src/lib/department-notify.ts`; the short version:
 
 - The notifier is a **headless background process** with no browser to complete an OAuth consent flow
   in. Claude Code's own OAuth client (§1 above) lives entirely inside Claude Code's process and isn't a
@@ -100,7 +100,7 @@ This is the one deliberate, documented deviation from a literal reading of the d
   *any* headless process to mint an MCP-audience token.
 - The functionally-equivalent REST surface already exists — `GET /api/v1/dept-tasks`
   (`cloud/apps/api/src/modules/mesh/routes.ts`) — authenticated by the exact credential store this task
-  was told to use (`apps/pipeline-cli/src/lib/cloud-config.ts`'s PAT, populated by `pipeline cloud
+  was told to use (`<cli>/src/lib/cloud-config.ts`'s PAT, populated by `pipeline cloud
   connect`'s device flow). Persona B's step budget shows **zero** additional user-facing setup for the
   notifier, which only holds if it reuses an already-established credential instead of running a second
   OAuth dance nobody asked for.
@@ -121,7 +121,7 @@ a real cross-session notification) is deferred to the `e3` P2 gate, once `c12`/`
   └─ job 2: drainPendingNotifications() — reads + clears the pending queue,
               emits it as SessionStart additionalContext (shown once, self-limiting)
 
-apps/pipeline-cli/src/commands/department-notify.ts   `pipeline department notify [--interval-ms] [--once] [--json]`
+<cli>/src/commands/department-notify.ts   `pipeline department notify [--interval-ms] [--once] [--json]`
   │  (also reachable via commands/department.ts's `notify` verb, and via the
   │   DEPRECATED, hidden `pipeline mesh notify` alias in commands/mesh.ts)
   │

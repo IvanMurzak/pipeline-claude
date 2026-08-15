@@ -368,10 +368,12 @@ describe.skipIf(process.platform !== 'win32' || !SH)('run-hook.sh resolves a REA
 // second, read-only question after a failure (`pipeline hook --help`, which
 // succeeds on a CLI that has the subcommand and is refused by one that does
 // not) instead of guessing from the exit code. Both fakes below answer that
-// probe the way the real CLIs do — the old one from
-// `apps/pipeline-cli/src/cli.ts`'s `unknown command '${command}'` default
-// branch, the new one from `IvanMurzak/pipeline`'s `runHook`, whose `--help`
-// prints usage on stdout and returns 0.
+// probe the way the real CLIs do — the old one from the pre-extraction
+// embedded CLI's `unknown command '${command}'` default branch (that copy
+// lived at `apps/pipeline-cli/` and was REMOVED in plugin-thin `p9`; the fake
+// stays because a user can still have that vintage installed), the new one
+// from `IvanMurzak/pipeline`'s `runHook`, whose `--help` prints usage on
+// stdout and returns 0.
 // ---------------------------------------------------------------------------
 
 /** A fake OLD `pipeline`: no `hook` subcommand at all, so every invocation —

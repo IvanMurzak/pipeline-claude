@@ -2,7 +2,7 @@
 
 Reference for **hook authors** writing `.pipeline/.hooks/worktree-{create,finalize,destroy}` scripts in a consumer project. (v1 spelled this isolation scope `external`; the hooks and their environment are unchanged.) The `pipeline next` CLI executes these hooks itself, in-process (from the PROJECT ROOT, env-var inputs, JSON-on-stdout; timeouts: 600 s create, 600 s finalize, 300 s destroy) — the `pipeline-manager` agent never passes these variables and never runs the hooks.
 
-This contract is **FROZEN**: existing consumer hooks must keep working unmodified. If you change anything here, update `apps/pipeline-cli/src/lib/hooks.ts`, `apps/pipeline-cli/src/commands/next.ts`, and the README's external-isolation section in lockstep, and bump the plugin version.
+This contract is **FROZEN**: existing consumer hooks must keep working unmodified. If you change anything here, update `<cli>/src/lib/hooks.ts`, `<cli>/src/commands/next.ts`, and the README's external-isolation section in lockstep, and bump the plugin version.
 
 ## `worktree-create` (required for `isolation: run`)
 

@@ -313,7 +313,7 @@ interchangeable — one names a concept, the other names how you invoke it.
 select via the `PIPELINE.md` field `runner: headless` (`driver`'s v1 spelling —
 a rename with a read-time shim, so nothing that already sets it changes
 behavior). `standalone` and a `pipeline.yml`-level `runner:` key belong to this
-same four-mode design but are not wired into this bundled CLI yet — nothing
+same four-mode design but are not wired into the `pipeline` CLI yet — nothing
 here is a promise that either runs today.
 
 ## Using the plugin in a consumer project
@@ -545,7 +545,7 @@ Run "release-server" now? [Y/n]            # /pipeline:find — asks
 
 For a GitHub issue, run either skill with the URL: `/pipeline:find https://github.com/owner/repo/issues/123`. The matcher calls `gh issue view --json title,body` and uses that as the task. Useful when triaging incoming issues.
 
-The matcher and the disambiguator both live in this plugin — nothing to install in the consumer project beyond **Bun** (already required by the bundled CLI); the matcher runs as the bundled `pipeline match` CLI. (`gh` is needed only for the `--issue` form.)
+The disambiguator lives in this plugin; the matcher runs as `pipeline match` in the **`@baizor/pipeline` CLI**, which you install once (`bun add -g @baizor/pipeline`) and which this plugin requires anyway — see [Install](#install). Nothing extra is installed *per consumer project*. (`gh` is needed only for the `--issue` form.)
 
 ## Self-improving pipelines
 
@@ -961,7 +961,7 @@ Cleanup is part of the run contract, and it is outcome-aware:
 - **External-isolation runs**: on a COMPLETED run the destroy hook is invoked with `PIPELINE_WT_DELETE_BRANCHES=1` so the run branch dies with the worktree (opt out via `delete_branches: false`). On `halted` / `depth-exhausted` the worktree AND branch are deliberately preserved for post-mortem and resume — that is not a leak, it is evidence.
 - **Failure paths are surfaced, never silent**: a merge conflict or mid-layer halt enumerates every not-yet-merged branch + worktree path in the halt detail.
 
-Verify (or clean) at any time with the bundled janitor:
+Verify (or clean) at any time with the CLI's janitor:
 
 ```
 pipeline gc            # report: registered/stale worktrees, prunable records, orphaned worktree-* branches
@@ -1232,7 +1232,7 @@ Some department tasks take a while, and `tasks.wait` (the tool the agent loops o
 - The moment one of your tasks needs input or reaches a final state (done, failed, canceled, rejected), it fires a best-effort **OS-level notification** (a toast / notify-send / balloon, depending on your platform) right then.
 - Every such transition is also written to a small durable queue, so even if you miss the toast (or your platform doesn't support one), the **next time you open Claude Code — in any project** — a `SessionStart` hook drains that queue and adds it as context, and the agent tells you about it.
 
-You don't do anything extra to get this: it reuses the same credential `pipeline cloud connect` already stores (see `apps/pipeline-cli/src/lib/cloud-config.ts`) and needs no separate setup or consent step of its own.
+You don't do anything extra to get this: it reuses the same credential `pipeline cloud connect` already stores (see `<cli>/src/lib/cloud-config.ts`) and needs no separate setup or consent step of its own.
 
 ```bash
 # one-time (if you haven't already connected the CLI to the cloud for other reasons):
@@ -1251,7 +1251,7 @@ Opt out with `PIPELINE_DEPARTMENT_NOTIFY_ENABLED=0` (same falsy-value convention
 > rather than the `/mcp` tool surface Claude Code itself uses. A headless
 > background process has no browser session to complete an OAuth consent flow in,
 > so it reuses what is already there. Full reasoning is in the header comment of
-> `apps/pipeline-cli/src/lib/department-notify.ts`.
+> `<cli>/src/lib/department-notify.ts`.
 
 ## Resuming a halted pipeline
 
