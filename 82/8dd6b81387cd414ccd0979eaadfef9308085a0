@@ -1,0 +1,20 @@
+tests/hook-run-shim.test.ts
+  s_303d0d7286eb57::t_3fd9482ade070c 84-109
+  s_303d0d7286eb57::t_ee5078be220149 128,130-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "828dd6b81387cd414ccd0979eaadfef9308085a0",
+  "prompts": {},
+  "sessions": {
+    "s_303d0d7286eb57": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ccf91804-9560-4674-84cf-ff47468a24e8",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
