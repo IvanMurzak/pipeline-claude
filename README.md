@@ -77,16 +77,18 @@ applies on Windows.**
 - **Git Bash — Windows only.** This plugin's hooks are pinned to `bash`, so a
   Windows machine needs one. Install
   [Git for Windows](https://git-scm.com/download/win), which bundles Git Bash, or
-  run `winget install --id Git.Git -e --source winget`. Claude Code looks for
-  Git Bash by **location, not on `PATH`** — so a Scoop or portable Git satisfies
-  the instruction above and still fails every hook; if yours lives anywhere other
-  than `C:\Program Files\Git`, point `CLAUDE_CODE_GIT_BASH_PATH` at its
-  `bash.exe`. Without it the hooks
-  **fail visibly**: Claude Code reports each hook it could not start, a few times
-  per session, rather than silently doing nothing. That is the intended trade — an
-  error you can see and act on, instead of hooks that look installed and quietly
-  never run. It does not interrupt your work: a hook Claude Code cannot start is
-  a **non-blocking** error, so the session and the tool call carry on regardless.
+  run `winget install --id Git.Git -e --source winget`. Claude Code finds it by
+  **probing fixed locations first** — `CLAUDE_CODE_GIT_BASH_PATH`, then
+  `C:\Program Files\Git\bin\bash.exe`, then the `(x86)` variant — and only then
+  falls back to deriving `..\..\bin\bash.exe` from wherever `git` resolves on
+  `PATH`. An install that does not match that shape — a Scoop shim, for instance —
+  is not found even though `git` works: point `CLAUDE_CODE_GIT_BASH_PATH` at its
+  `bash.exe`. **Without Git Bash** the hooks **fail visibly**: Claude Code reports
+  each hook it could not start, a few times per session, rather than silently
+  doing nothing. That is the intended trade — an error you can see and act on,
+  instead of hooks that look installed and quietly never run. It does not
+  interrupt your work: a hook Claude Code cannot start is a **non-blocking**
+  error, so the session and the tool call carry on regardless.
   Claude Code's own message suggests pinning the hooks to `powershell` instead —
   **don't**: the shim is POSIX shell, and PowerShell brings back the silent
   failure the pin exists to close. macOS and Linux are unaffected, `bash` is

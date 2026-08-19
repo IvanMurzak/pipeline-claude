@@ -8,6 +8,54 @@ repository at `apps/pipeline-cli/` and released from it.** It does not any more 
 Historical entries are left exactly as written; only this masthead is updated, because it
 describes the file rather than recording anything. Earlier history still is in `git log`.
 
+## plugin 0.98.0 — every hook pins `bash`, and Git Bash becomes a Windows prerequisite
+
+**All ten command hooks now carry `"shell": "bash"`** ([#124]) — Stop 2, SubagentStop 2,
+SessionStart 2, PreToolUse 1, PostToolUse 1, UserPromptSubmit 1, Notification 1. `"shell"` is a
+documented sibling of `"type"` and `"command"`; omitted, Claude Code picks Git Bash on Windows and
+**falls back to PowerShell when Git Bash is absent**, handing `hooks/run-hook.sh` — which is POSIX
+sh — to a shell that cannot execute it. That fallback was measured ([#122]) as either a hang or,
+worse, a dispatcher that exits 0 **without running the shim at all**: on PreToolUse that turns a
+deny-hook into a permit. macOS and Linux are unaffected; `bash` was already being used there.
+
+**This is a new hard prerequisite on Windows, which is why the version moved a minor.** A Windows
+machine now needs Git Bash — [Git for Windows](https://git-scm.com/download/win) bundles it, or
+`winget install --id Git.Git -e --source winget`. Without it, **every hook reports a startup error
+a few times per session** instead of silently doing nothing. That is the trade the pin buys: an
+error you can see and act on, in place of hooks that look installed and quietly never run. It does
+not interrupt anything — a hook Claude Code cannot start is a `non_blocking_error`, so the session
+and the tool call carry on.
+
+**If Git Bash is installed somewhere non-standard, set `CLAUDE_CODE_GIT_BASH_PATH`.** Detection
+probes fixed locations first — that variable, then `C:\Program Files\Git\bin\bash.exe`, then the
+`(x86)` variant — and only then derives `..\..\bin\bash.exe` from wherever `git` resolves on
+`PATH`. An install whose layout does not match one of those shapes (a Scoop shim is the common
+case) is not found *even though `git` itself works fine*. Point the variable at the `bash.exe`
+binary itself; a path whose basename is not `bash.exe`/`sh.exe`/`bash`/`sh`, or that does not
+exist, is warned about and ignored.
+
+**Do not take Claude Code's suggestion to add `"shell": "powershell"`.** Its "requires bash but
+Git Bash was not found" message proposes exactly that, and for this plugin it re-opens the
+fail-open path the pin exists to close.
+
+**Visibility is all the pin buys — it does not make hook-based blocking reliable.** A bash-pinned
+hook on a Windows machine with no detected Git Bash throws *before* the spawn, outside the spawn's
+own try, and the hook runner classifies that as `non_blocking_error` (deduped per event+command
+per session). **The tool call still proceeds.** The only outcome that blocks is a hook that
+actually ran and exited 2. So a bash-pinned PreToolUse deny-hook on a Git-Bash-less Windows box
+still reads as an *allow* — an announced one, rather than one indistinguishable from approval. Do
+not build a genuinely blocking PreToolUse hook on top of `hooks.json` expecting the platform to
+hold it closed.
+
+**Why a version bump ships with it.** Claude Code caches installed plugins by `name@version` and
+never re-fetches on a content change, so the pin would have reached nobody already on `0.97.0`.
+CI now also asserts the pin for every registered hook, with a failure message naming the offending
+event — previously the only thing guarding it was prose in `hooks.json`, and prose does not fail
+CI.
+
+[#122]: https://github.com/IvanMurzak/pipeline-claude/pull/122
+[#124]: https://github.com/IvanMurzak/pipeline-claude/pull/124
+
 ## plugin 0.97.0 — the embedded CLI copy is deleted; the plugin ships no code
 
 `apps/pipeline-cli/` is **gone** — 229 tracked files, the last of the pre-extraction copy.
