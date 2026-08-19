@@ -1,0 +1,32 @@
+tests/hook-run-shim.test.ts
+  s_b0d6dae684b6dc::t_64d06eb8f9574a 707,709-713,715,718,729-748
+  s_d6ec059f93235b::t_fdbd606f22be15 749
+.claude-plugin/plugin.json
+  s_b0d6dae684b6dc::t_c82752210021b3 3
+README.md
+  s_b0d6dae684b6dc::t_6913541c570b2b 80-84,90-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "d3f45516470a32b6eee08aa3c2a0c482855f4195",
+  "prompts": {},
+  "sessions": {
+    "s_b0d6dae684b6dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a10d359-39fb-4d74-8cd3-e80b2772eb52",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_d6ec059f93235b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaca8eb3-af38-4560-ab4d-ad86b87a1d9f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
