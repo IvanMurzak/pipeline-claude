@@ -78,10 +78,12 @@ applies on Windows.**
   Windows machine needs one. Install
   [Git for Windows](https://git-scm.com/download/win), which bundles Git Bash, or
   run `winget install --id Git.Git -e --source winget`. Without it the hooks
-  **fail visibly** rather than silently doing nothing — that is the intended
-  trade, and it is the safe one: a hook that blocks a tool call must never read
-  as an allow just because it could not run. macOS and Linux are unaffected,
-  `bash` is already there.
+  **fail visibly**: Claude Code reports each hook it could not start, a few times
+  per session, rather than silently doing nothing. That is the intended trade — an
+  error you can see and act on, instead of hooks that look installed and quietly
+  never run. It does not interrupt your work: a hook Claude Code cannot start is
+  a **non-blocking** error, so the session and the tool call carry on regardless.
+  macOS and Linux are unaffected, `bash` is already there.
 
 **The cloud step is the only network step, and it is not a trapdoor.** Nothing
 about your code or your keys goes with it: the control plane coordinates runs and
