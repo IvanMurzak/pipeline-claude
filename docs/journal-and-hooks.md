@@ -45,12 +45,13 @@ exit blocks the tool call. `run-hook.sh` therefore does not blindly `exec` the
 `hook` shape any more: it runs it with the streams still inherited, and on a
 non-zero exit asks the CLI one read-only question — `pipeline hook --help`,
 which succeeds on a CLI that has the subcommand and is refused by one that does
-not. Version skew exits **1** — never the old CLI's own 2, which is the blocked
-tool call this whole branch exists to defuse, and never 0, which is what made
-the upgrade line invisible until plugin 0.99.0 (see the channel note below) —
-with one actionable upgrade line under `--loud`; a relay that genuinely failed
-still propagates its exit code, because a PreToolUse deny is a correct non-zero
-exit and must not be swallowed.
+not. Version skew never propagates the old CLI's own 2 — that is the blocked
+tool call this whole branch exists to defuse. Under `--loud` it exits **1**
+and prints one actionable upgrade line; exit 1 rather than 0 is what makes
+that line visible at all (see the channel note below), and it stayed invisible
+until plugin 0.99.0. In quiet mode there is no line to deliver, so it still
+exits **0**. A relay that genuinely failed still propagates its exit code,
+because a PreToolUse deny is a correct non-zero exit and must not be swallowed.
 
 **A CLI that IS new enough to answer `hook` can still be too old** — that
 probe only proves the subcommand exists, not that it does everything a skill
@@ -86,10 +87,13 @@ written and discarded until plugin 0.99.0. Exit 1 surfaces them as a
 `hook_non_blocking_error` and blocks nothing; exit 2 is the blocking status,
 which this shim never produces of its own. One residual gap, by design: if the
 relay on that one invocation wrote schema-valid `hookSpecificOutput` JSON to
-stdout, Claude Code applies the JSON and ignores the exit code, so the line is
-recorded but not surfaced. It fails toward silence, never toward a block, and
-the relay's own output is never lost. **A relay that writes plain text to
-stdout would break that** — see `run-hook.sh`'s own note before adding one.
+stdout, Claude Code applies the JSON, ignores the exit code, and **our line is
+dropped** — no notice is raised, and it survives only as a field inside that
+hook's own transcript record, which nothing renders. It fails toward silence,
+never toward a block, and the relay's own output is never lost. **A relay that
+writes plain text to stdout would invert that trade** — our line would surface
+and the relay's `additionalContext` would be destroyed instead, which is the
+half that is not acceptable. See `run-hook.sh`'s own note before adding one.
 
 **Write scope with respect to the consumer project: STRICTLY inside
 `<project>/.pipeline/`.** The hooks only ever append to `.runtime/events.jsonl`

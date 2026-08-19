@@ -18,16 +18,25 @@ transcript, not the user, not Claude. So the line was written, and then discarde
 `0.94.0` shipped the third of them and `0.98.0` recorded it as working. It was not working; it
 was inaudible, and nothing in the plugin could have told you so.
 
-**The fix is the exit code, not the wording.** Those three paths now exit **1**, which Claude Code
-surfaces in the transcript as a `hook_non_blocking_error` carrying the line. Measured against
+**The fix is the exit code, not the wording.** Whenever one of those three paths actually prints
+its line it now exits **1**, which Claude Code surfaces in the transcript as a
+`hook_non_blocking_error` carrying the text. (A hook that prints nothing still exits 0 — quiet
+mode is unchanged, and the two install/upgrade lines are still `--loud`-only.) Measured against
 Claude Code 2.1.236 by running real sessions and reading the transcripts back, rather than
 inferred from the docs:
 
-| hook exits | its stdout | what the user sees |
-| --- | --- | --- |
-| 0 | anything | **nothing** |
-| 1 | empty or plain text | the stderr line, as a non-blocking notice |
-| 1 | schema-valid hook JSON | nothing — the JSON decides the outcome and the exit code is ignored |
+| hook exits | its stdout | what the user sees | the relay's own context |
+| --- | --- | --- | --- |
+| 0 | anything | **nothing** | applied |
+| 1 | empty or plain text | the stderr line, as a non-blocking notice | **destroyed** |
+| 1 | schema-valid hook JSON | nothing — the JSON decides the outcome and the exit code is ignored | applied |
+
+The last column is why the relays' output shape matters, and it bites on the events where plain
+stdout *is* the context channel — `SessionStart` and `UserPromptSubmit`. Two of the five relays
+(`department-notifier`, `prompt-match`) do write stdout, and both write schema-valid JSON, so they
+land in the bottom row: their payload survives and only our warning is dropped. A relay emitting
+plain text would land in the middle row and lose its `additionalContext` instead — so a relay may
+return context as JSON, never as bare text.
 
 **Exit 1 never blocks anything.** A PreToolUse hook exiting 1 was measured letting its tool call
 run to completion. Exit **2** is the blocking status, and this shim still never produces one of

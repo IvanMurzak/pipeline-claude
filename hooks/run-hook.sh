@@ -156,10 +156,12 @@
 #
 # THE RESIDUAL GAP, stated rather than hidden: row 4. If the relay on the
 # invocation that happens to claim the once-per-session marker writes
-# schema-valid hook JSON to stdout, our line is recorded in the transcript but
-# not surfaced as a notice. It fails toward SILENCE — never toward a block,
-# never toward a swallowed deny — because in that row the relay's own JSON
-# still decides the outcome exactly as it does today.
+# schema-valid hook JSON to stdout, OUR LINE REACHES NOBODY: the hook is
+# classified a success, no notice is raised, and the text survives only as a
+# field inside that hook's own transcript record, which nothing renders. It is
+# dropped, not deferred. It fails toward SILENCE — never toward a block, never
+# toward a swallowed deny — because in that row the relay's own JSON still
+# decides the outcome exactly as it does today.
 #
 # WHAT THE SAFETY ACTUALLY RESTS ON — read this before adding a relay.
 # It is NOT that the relays write nothing to stdout. Two of the five DO:
@@ -169,13 +171,20 @@
 # own output survives untouched and only OUR line goes quiet.
 #
 # A relay writing PLAIN TEXT to stdout would be row 3, and row 3 is not merely
-# "our line is visible". Measured: exit 1 + plain-text stdout produced a
-# `hook_non_blocking_error` and NO `hook_additional_context` attachment at
-# all, while the same text as JSON produced both. So on an invocation that
-# also warns, exit 1 would DESTROY that relay's additionalContext — and on
-# SessionStart and UserPromptSubmit plain stdout IS the context channel. This
-# is a real constraint on any relay added later, not a stylistic one:
-# A RELAY MAY RETURN CONTEXT AS JSON, NEVER AS BARE TEXT.
+# "our line is visible" — the two rows trade off, they do not stack. Measured,
+# same payload, same exit 1, only the stdout FORM differing:
+#   • as JSON       → `hook_additional_context` attachment present, and our
+#                     line raised NO notice (row 4: the relay's context lands,
+#                     our warning is dropped);
+#   • as plain text → our line surfaced as `hook_non_blocking_error`, and NO
+#                     `hook_additional_context` attachment AT ALL (row 3: our
+#                     warning lands, the relay's context is destroyed).
+# So on an invocation that also warns, a plain-text relay would LOSE its
+# additionalContext — and on SessionStart and UserPromptSubmit plain stdout IS
+# the context channel. This is a real constraint on any relay added later, not
+# a stylistic one: A RELAY MAY RETURN CONTEXT AS JSON, NEVER AS BARE TEXT.
+# Losing our own warning is the acceptable half of that trade; losing a
+# relay's payload is not, which is why the JSON form is the one that must hold.
 #
 # The narrowness is therefore in WHICH invocation speaks, not in the relays
 # being silent. The `--loud` SessionStart entry is `session-relay`, which
@@ -514,18 +523,31 @@ if [ "$status" -eq 0 ]; then
   # on Linux. Depending on any of them would break the one assumption this
   # whole shim exists to avoid — that PATH is usable.
   #
-  # Do not assume the host rescues a wedged spawn either. MEASURED (Claude
-  # Code 2.1.236): a PostToolUse hook that slept 300s was NOT killed — the
-  # turn took 318s end to end. There is no default hook timeout to fall back
-  # on, so "it stalls until the platform's timeout" is not true here.
+  # The host DOES cap a hook — but the cap is a deadline, not a rescue, and it
+  # is PER EVENT. MEASURED (Claude Code 2.1.236):
+  #   • UserPromptSubmit: a hook sleeping 70s was cancelled at 30s —
+  #     attachment `hook_cancelled`, `timedOut: true`, `timeoutMs: 30000`.
+  #   • PostToolUse: a hook sleeping 300s was NOT cancelled at all — the turn
+  #     took 318s end to end and no `timedOut` was recorded.
+  #
+  # Two things follow, and the second is why this matters here. Cancelling
+  # does NOT kill the process or shorten the wall clock: `durationMs` read
+  # 70619 for that 70s sleep, so DURATION ALONE LOOKS EXACTLY LIKE "no
+  # timeout" — which is how an earlier draft of this comment concluded there
+  # was none. `timedOut`/`timeoutMs`, in the same record, are what settle it.
+  # And exceeding the cap DISCARDS THE HOOK'S OUTPUT: the cancelled hook's
+  # stderr appeared ZERO times in the transcript. So on a short-capped event a
+  # wedged CLI does not delay our warning, it loses it silently — one more
+  # reason the check is worth nothing if the spawn can hang.
   #
   # What bounds the damage is this ordering. The marker is on disk before
   # `--version` is ever spawned, so a CLI that wedges costs at most ONE
   # invocation in that session: every later hook sees the marker, skips the
-  # check and spawns nothing, even if this one was killed mid-spawn. Before
-  # `w4` this spawn only happened at SessionStart; it can now land on a
-  # PostToolUse, so the exposure moved from "once at startup" to "once per
-  # session, possibly mid-turn" — not to "every tool call".
+  # check and spawns nothing, even if this one was cancelled mid-spawn. Before
+  # `w4` this spawn only happened at SessionStart; it can now land on any
+  # event this shim is wired to — `UserPromptSubmit`, the 30s-capped one
+  # above, among them — so the exposure moved from "once at startup" to "once
+  # per session, possibly mid-turn". Not to "every tool call".
   #
   # If that ever needs closing properly, the lever is `hooks.json`'s per-hook
   # `timeout` field, not shell code here.
