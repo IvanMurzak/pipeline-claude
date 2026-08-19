@@ -1,0 +1,32 @@
+hooks/run-hook.sh
+  s_b0d6dae684b6dc::t_2f1bdb0932f2b5 160-187
+  s_b0d6dae684b6dc::t_79856440832042 341-351
+  s_b0d6dae684b6dc::t_16cec9993d20e0 507-531
+  s_b0d6dae684b6dc::t_ab895b2a44467c 283-292
+tests/hook-run-shim.test.ts
+  s_b0d6dae684b6dc::t_a4fdbc41adbf28 1050-1068
+  s_b0d6dae684b6dc::t_71474fe61601ea 247-252,254
+  s_b0d6dae684b6dc::t_1025126e669a20 233,235-245,253,255
+  s_b0d6dae684b6dc::t_c7b9fc79585312 93
+  s_b0d6dae684b6dc::t_2d1d11dd28e7dc 773
+  s_b0d6dae684b6dc::t_8edcd28c15f6ff 895-903,907-915,924
+docs/journal-and-hooks.md
+  s_b0d6dae684b6dc::t_69efc159911271 61-92
+  s_b0d6dae684b6dc::t_7d0d23c31d0ca0 48-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3052ee43366b1a8e1cae2f23b38f056f99589e88",
+  "prompts": {},
+  "sessions": {
+    "s_b0d6dae684b6dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a10d359-39fb-4d74-8cd3-e80b2772eb52",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
