@@ -63,7 +63,8 @@ cloud. No browser, no account, nothing sent anywhere.
 
 <br>
 
-**Two prerequisites, and `init` is explicit about both.**
+**Three prerequisites. `init` is explicit about the first two; the third only
+applies on Windows.**
 
 - **Bun.** The CLI's executable is TypeScript, so Bun is required, not preferred.
   `pipeline init` stops immediately with the install URL if `bun` isn't found.
@@ -73,6 +74,14 @@ cloud. No browser, no account, nothing sent anywhere.
   so, skips the plugin install and the starter run, and still exits 0 — the clone
   and the dashboard are done, and you re-run `pipeline init` once Claude Code is
   there.
+- **Git Bash — Windows only.** This plugin's hooks are pinned to `bash`, so a
+  Windows machine needs one. Install
+  [Git for Windows](https://git-scm.com/download/win), which bundles Git Bash, or
+  run `winget install --id Git.Git -e --source winget`. Without it the hooks
+  **fail visibly** rather than silently doing nothing — that is the intended
+  trade, and it is the safe one: a hook that blocks a tool call must never read
+  as an allow just because it could not run. macOS and Linux are unaffected,
+  `bash` is already there.
 
 **The cloud step is the only network step, and it is not a trapdoor.** Nothing
 about your code or your keys goes with it: the control plane coordinates runs and
