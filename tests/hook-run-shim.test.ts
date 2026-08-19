@@ -704,15 +704,18 @@ describe.skipIf(!SH)('run-hook.sh minimum CLI version (B.2: hook-capable but too
 // ---------------------------------------------------------------------------
 
 describe('hooks/hooks.json wiring', () => {
-  test('all 10 hook commands route through run-hook.sh and invoke `hook <relay>`; no `.ts` relay path and no bare `bun ` survives', () => {
+  test('all 10 hook commands route through run-hook.sh, invoke `hook <relay>`, and pin `"shell": "bash"`; no `.ts` relay path and no bare `bun ` survives', () => {
     const raw = readFileSync(join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf-8');
-    const parsed = JSON.parse(raw) as { hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>> };
-    const commands: string[] = [];
-    for (const entries of Object.values(parsed.hooks)) {
+    const parsed = JSON.parse(raw) as {
+      hooks: Record<string, Array<{ hooks: Array<{ type?: string; command: string; shell?: string }> }>>;
+    };
+    const registered: Array<{ event: string; type?: string; command: string; shell?: string }> = [];
+    for (const [event, entries] of Object.entries(parsed.hooks)) {
       for (const entry of entries) {
-        for (const hook of entry.hooks) commands.push(hook.command);
+        for (const hook of entry.hooks) registered.push({ event, ...hook });
       }
     }
+    const commands = registered.map((h) => h.command);
     expect(commands.length).toBe(10);
     for (const cmd of commands) {
       expect(cmd).toContain('hooks/run-hook.sh');
@@ -722,6 +725,27 @@ describe('hooks/hooks.json wiring', () => {
       expect(cmd, `hooks.json still invokes a .ts relay path: ${cmd}`).not.toContain('.ts');
       const invoked = RELAYS.filter((r) => cmd.endsWith(` hook ${r}`));
       expect(invoked.length, `not exactly one \`hook <relay>\` invocation in: ${cmd}`).toBe(1);
+    }
+
+    // EVERY command hook pins the shell (T-CLI-2 remedy, ROADMAP row B.5).
+    // Until this assertion existed, the only thing guarding the pin was prose
+    // in hooks.json's `description`, and prose does not fail CI: a new hook
+    // could be added unpinned with everything green, and that single event
+    // would keep the fail-open path while every other event looked fixed.
+    // Omitted, Claude Code picks Git Bash on Windows and falls back to
+    // PowerShell when Git Bash is absent — handing `run-hook.sh`, which is
+    // POSIX sh, to a shell that cannot execute it. PR #122 measured that
+    // fallback as either a hang or a dispatcher that exits 0 WITHOUT running
+    // the shim, which on PreToolUse turns a deny-hook into a permit.
+    for (const hook of registered) {
+      expect(
+        hook.shell,
+        `hooks.json ${hook.event} hook is not pinned to bash: ${hook.command}\n` +
+          '  Add `"shell": "bash"` beside `"type"` and `"command"` on that entry.\n' +
+          '  Do NOT pin it to "powershell" — Claude Code\'s own error message suggests\n' +
+          '  that, but run-hook.sh is POSIX sh and PowerShell re-opens the fail-open\n' +
+          '  path this pin exists to close. Windows users need Git Bash; README says so.',
+      ).toBe('bash');
     }
   });
 
