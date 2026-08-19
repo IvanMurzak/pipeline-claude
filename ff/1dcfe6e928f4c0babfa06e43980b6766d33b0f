@@ -1,0 +1,30 @@
+hooks/run-hook.sh
+  s_b0d6dae684b6dc::t_ed07dfb8b02dde 174-187
+  s_b0d6dae684b6dc::t_8ece57f5d9bfc3 546-550
+  s_b0d6dae684b6dc::t_6c9219e42cde6a 159-164
+  s_b0d6dae684b6dc::t_51d2264351d786 526-541
+CLAUDE.md
+  s_b0d6dae684b6dc::t_0dca12f554cdb7 35
+CHANGELOG.md
+  s_b0d6dae684b6dc::t_f3c494e037e57d 21-24,28-33
+  s_b0d6dae684b6dc::t_7a343025c5dab0 34-39
+docs/journal-and-hooks.md
+  s_b0d6dae684b6dc::t_f3595bae63ad52 48-54
+  s_b0d6dae684b6dc::t_ce11658872ce35 90-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "ff1dcfe6e928f4c0babfa06e43980b6766d33b0f",
+  "prompts": {},
+  "sessions": {
+    "s_b0d6dae684b6dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a10d359-39fb-4d74-8cd3-e80b2772eb52",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
