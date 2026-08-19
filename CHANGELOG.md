@@ -8,6 +8,58 @@ repository at `apps/pipeline-cli/` and released from it.** It does not any more 
 Historical entries are left exactly as written; only this masthead is updated, because it
 describes the file rather than recording anything. Earlier history still is in `git log`.
 
+## plugin 0.99.0 — the CLI-version and missing-CLI warnings were invisible; now they are not
+
+**Every warning `hooks/run-hook.sh` has ever printed reached nobody.** All three of them — the
+`pipeline` CLI is not installed, the CLI is too old to have a `hook` subcommand at all, and the
+CLI is below the plugin's `MIN_CLI_VERSION` floor — wrote one actionable line to stderr and then
+exited 0. **Claude Code routes a zero-exit hook's stderr to the debug log only:** not the
+transcript, not the user, not Claude. So the line was written, and then discarded, every time.
+`0.94.0` shipped the third of them and `0.98.0` recorded it as working. It was not working; it
+was inaudible, and nothing in the plugin could have told you so.
+
+**The fix is the exit code, not the wording.** Whenever one of those three paths actually prints
+its line it now exits **1**, which Claude Code surfaces in the transcript as a
+`hook_non_blocking_error` carrying the text. (A hook that prints nothing still exits 0 — quiet
+mode is unchanged, and the two install/upgrade lines are still `--loud`-only.) Measured against
+Claude Code 2.1.236 by running real sessions and reading the transcripts back, rather than
+inferred from the docs:
+
+| hook exits | its stdout | what the user sees | the relay's own context |
+| --- | --- | --- | --- |
+| 0 | anything | **nothing** | applied |
+| 1 | empty or plain text | the stderr line, as a non-blocking notice | **destroyed** |
+| 1 | schema-valid hook JSON | nothing — the JSON decides the outcome and the exit code is ignored | applied |
+
+The last column is why the relays' output shape matters, and it bites on the events where plain
+stdout *is* the context channel — `SessionStart` and `UserPromptSubmit`. Two of the five relays
+(`department-notifier`, `prompt-match`) do write stdout, and both write schema-valid JSON, so they
+land in the bottom row: their payload survives and only our warning is dropped. A relay emitting
+plain text would land in the middle row and lose its `additionalContext` instead — so a relay may
+return context as JSON, never as bare text.
+
+**Exit 1 never blocks anything.** A PreToolUse hook exiting 1 was measured letting its tool call
+run to completion. Exit **2** is the blocking status, and this shim still never produces one of
+its own — the only 2 it can emit is a relay's own, propagated verbatim. A `pipeline fix` scope
+guard that denies an out-of-scope edit is exactly that case, and it is unchanged.
+
+**The `MIN_CLI_VERSION` check now runs on every hook invocation, not only at SessionStart** — which
+is what closes the gap where a plugin upgrade raised the floor mid-session and nothing re-checked
+it. `/reload-plugins` activates an upgrade **without a restart and without re-firing
+SessionStart**, so the old SessionStart-only check could not see it; a restart was the only thing
+that ever re-fired it.
+
+**It costs one `pipeline --version` spawn per session, not one per tool call.** A marker file in
+the system temp directory caches the verdict, keyed on the floor itself, the (version-pinned)
+plugin root, the resolved CLI path, and the session. Twenty hook invocations produce one spawn and
+one line. A raised floor arriving mid-session is a different key, so it re-fires immediately. If
+you *upgrade the CLI* mid-session the marker keeps the old verdict and stays quiet until the next
+session — deliberately, because silence after a fix is cheap and a false warning is not.
+
+**Nothing about the version-skew classifier changed.** A CLI with no `hook` subcommand is still
+identified by a read-only `pipeline hook --help` probe that runs only after a failure, and a relay
+that genuinely failed still propagates its own exit code.
+
 ## plugin 0.98.0 — every hook pins `bash`, and Git Bash becomes a Windows prerequisite
 
 **All ten command hooks now carry `"shell": "bash"`** ([#124]) — Stop 2, SubagentStop 2,

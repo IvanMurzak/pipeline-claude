@@ -89,44 +89,138 @@
 # this file is the only place that compares against it — `pipeline --version`
 # is not checked anywhere else in this plugin.
 #
-# The check runs ONLY on the `--loud` SessionStart entry (`--loud hook
-# session-relay`), and ONLY after that relay call has already succeeded —
-# i.e. only once this CLI is already known to have `hook`. That keeps this
-# mechanism and the one above strictly disjoint: a CLI old enough to fail the
-# `hook --help` probe is classified (and warned about) up there and never
-# reaches this check, so the two can never both print in the same session.
+# WHEN THE CHECK RUNS — changed by `w4`, and this is the whole of T-CLI-3.
+# It used to run ONLY on the `--loud` SessionStart entry, which made a RESTART
+# the only thing that could ever re-fire it. But `/reload-plugins` activates a
+# plugin upgrade MID-SESSION with no restart, and SessionStart does not fire
+# again — so a reloaded plugin carrying a RAISED floor went unchecked for the
+# rest of the session. That window was T-CLI-3, and closing it is what the
+# marker file below is for.
+#
+# So the check now runs on EVERY hook invocation — but it must NOT spawn
+# `pipeline --version` every time, which would add a process spawn to every
+# PostToolUse, i.e. to every tool call. A marker file in the system temporary
+# directory caches the verdict for the rest of the session; cli_marker_path
+# below documents what its name is keyed on and why each component is there.
+# On a cache hit the whole cost is one `[ -e ]` test: no spawn, no fork.
+#
+# It still runs ONLY after the relay call has already SUCCEEDED — i.e. only
+# once this CLI is already known to have `hook`. That keeps this mechanism and
+# the one above strictly disjoint: a CLI old enough to fail the `hook --help`
+# probe is classified (and warned about) up there and never reaches this
+# check, so the two can never both print in the same session.
 # Too old → one line to stderr naming the upgrade command; current or newer →
 # silence; a `--version` output that doesn't parse as this CLI's real shape
 # (bare `N.N.N`, verified against an actual install — see
 # check_min_cli_version below) → treated as UNKNOWN, reported once, never
 # treated as "too old" and never silently ignored.
 #
-# Channel, deliberately: STDERR — the same one the not-installed and
-# no-hook-subcommand lines above already use. Per Claude Code's hooks docs
-# (verified 2026-08-14), a SessionStart hook's STDOUT becomes
-# additionalContext — text Claude's context can see, not a guaranteed
-# user-visible banner — and SessionStart cannot block the session either way.
-# Matching the existing lines' channel keeps this file's `--loud` contract
-# single-shaped instead of adding a second delivery mechanism for what is the
-# same class of message.
+# ── THE DELIVERY DEFECT: every warning here used to reach NOBODY (`w4`) ─────
+#
+# All three of this file's warnings — CLI not installed, CLI too old to have
+# `hook`, CLI below MIN_CLI_VERSION — printed to stderr and then `exit 0`.
+# Claude Code sends a ZERO-exit hook's stderr to the DEBUG LOG ONLY: not the
+# transcript, not the user, not Claude. So for their entire existence none of
+# the three had ever been seen by anybody. `p8` shipped the third one and `w3`
+# recorded it as working. It was not working; it was inaudible.
+#
+# The fix is the EXIT CODE, not the wording. Measured against Claude Code
+# 2.1.236 on 2026-08-19 by running real sessions with a probe hook and reading
+# the session transcript back afterwards — not inferred from the docs:
+#
+#   exit 0 + stderr                    → nothing in the transcript at all
+#   exit 1 + stderr, stdout EMPTY      → transcript attachment
+#                                        `hook_non_blocking_error`, carrying
+#                                        "Failed with non-blocking status
+#                                        code: <our line>"          → VISIBLE
+#   exit 1 + stderr, stdout PLAIN TEXT → same `hook_non_blocking_error`
+#   exit 1 + stderr, stdout SCHEMA-VALID
+#                     hook JSON        → attachment `hook_success`: the JSON
+#                                        still takes effect, the exit code is
+#                                        IGNORED, and our stderr is NOT
+#                                        surfaced as an error     → INVISIBLE
+#
+# and in none of those rows is the action blocked. A PreToolUse hook exiting 1
+# was measured letting its Bash tool call run to completion. That is the
+# property which makes 1 usable here and 2 unusable: 2 is the BLOCKING status,
+# and a version problem must never block a tool call.
+#
+# WHY NOT A JSON `systemMessage` ON STDOUT: this shim's stdout IS THE RELAY'S
+# stdout, inherited, not ours. Writing our own JSON document after — or before
+# — the relay has written its own puts two documents on one stream, which at
+# best fails to parse and at worst corrupts a relay's contract, a PreToolUse
+# permissionDecision among them. stderr has no such contention. The one branch
+# where `systemMessage` WOULD be safe is not-installed, where no relay ever
+# runs; using it only there would mean two delivery mechanisms for one class
+# of message, so stderr + exit 1 is used uniformly instead.
+#
+# THE RESIDUAL GAP, stated rather than hidden: row 4. If the relay on the
+# invocation that happens to claim the once-per-session marker writes
+# schema-valid hook JSON to stdout, OUR LINE REACHES NOBODY: the hook is
+# classified a success, no notice is raised, and the text survives only as a
+# field inside that hook's own transcript record, which nothing renders. It is
+# dropped, not deferred. It fails toward SILENCE — never toward a block, never
+# toward a swallowed deny — because in that row the relay's own JSON still
+# decides the outcome exactly as it does today.
+#
+# WHAT THE SAFETY ACTUALLY RESTS ON — read this before adding a relay.
+# It is NOT that the relays write nothing to stdout. Two of the five DO:
+# `department-notifier-relay` (pending department notifications) and
+# `prompt-match-relay` (a pipeline suggestion). What makes exit 1 safe is that
+# both write SCHEMA-VALID `hookSpecificOutput` JSON, i.e. row 4 — the relay's
+# own output survives untouched and only OUR line goes quiet.
+#
+# A relay writing PLAIN TEXT to stdout would be row 3, and row 3 is not merely
+# "our line is visible" — the two rows trade off, they do not stack. Measured,
+# same payload, same exit 1, only the stdout FORM differing:
+#   • as JSON       → `hook_additional_context` attachment present, and our
+#                     line raised NO notice (row 4: the relay's context lands,
+#                     our warning is dropped);
+#   • as plain text → our line surfaced as `hook_non_blocking_error`, and NO
+#                     `hook_additional_context` attachment AT ALL (row 3: our
+#                     warning lands, the relay's context is destroyed).
+# So on an invocation that also warns, a plain-text relay would LOSE its
+# additionalContext — and on SessionStart and UserPromptSubmit plain stdout IS
+# the context channel. This is a real constraint on any relay added later, not
+# a stylistic one: A RELAY MAY RETURN CONTEXT AS JSON, NEVER AS BARE TEXT.
+# Losing our own warning is the acceptable half of that trade; losing a
+# relay's payload is not, which is why the JSON form is the one that must hold.
+#
+# The narrowness is therefore in WHICH invocation speaks, not in the relays
+# being silent. The `--loud` SessionStart entry is `session-relay`, which
+# writes no stdout at all — but the two SessionStart entries race for the
+# marker (see the claim below), so the notifier can win it and, when it does
+# have a notification pending, absorb the warning into row 4. The entry that
+# would have delivered the line is throttled by then. The next session
+# re-fires, so the cost is one deferred warning and never a lost relay
+# payload.
 #
 # Usage: run-hook.sh [--loud] <args passed to `pipeline`>
-#   --loud   pipeline-not-found, and an unusably old CLI — whether it lacks
-#            `hook` entirely or merely falls below MIN_CLI_VERSION — each
-#            print ONE actionable line to stderr before exiting 0 (never more
-#            than one such line per session; the two old-CLI mechanisms are
-#            mutually exclusive, see MINIMUM CLI VERSION above). Reserved for
-#            SessionStart, which fires once per session and is where a user
-#            can actually see and act on it. After `p6` the plugin genuinely
-#            REQUIRES an installed CLI of a recent enough version — it ships
-#            no code of its own any more — so that line is the whole safety
-#            net, and it names the install/upgrade command rather than merely
-#            reporting the problem.
-#   (default / no flag) both conditions exit 0 with NO output of our own —
-#            used for every other hook type. PreToolUse/PostToolUse/
+#   --loud   pipeline-not-found, and a CLI with no `hook` subcommand at all,
+#            each print ONE actionable line to stderr and then EXIT 1, so that
+#            the line is actually delivered (see THE DELIVERY DEFECT above).
+#            Reserved for SessionStart, which fires once per session and is
+#            where a user can actually see and act on it. After `p6` the
+#            plugin genuinely REQUIRES an installed CLI of a recent enough
+#            version — it ships no code of its own any more — so that line is
+#            the whole safety net, and it names the install/upgrade command
+#            rather than merely reporting the problem.
+#   (default / no flag) those two conditions exit 0 with NO output of our own
+#            — used for every other hook type. PreToolUse/PostToolUse/
 #            UserPromptSubmit fire on nearly every turn; printing there would
 #            flood the session, which is worse than the silent no-op these
 #            non-blocking hooks already degrade to when disabled.
+#
+#   NOT GATED ON --loud, since `w4`: the MIN_CLI_VERSION check. It runs on
+#   every invocation (T-CLI-3) and is flood-proofed by the once-per-session
+#   marker instead of by the mode flag — a marker survives a `/reload-plugins`
+#   that no SessionStart follows, and a mode flag cannot. When it warns, it
+#   exits 1 too. The two old-CLI mechanisms remain mutually exclusive, so at
+#   most ONE such line is ever printed per session.
+#
+#   EXIT 1 IS NEVER A BLOCK, and this file never produces an exit 2 of its
+#   own. The only 2 it can emit is a relay's own, propagated verbatim (see
+#   TELLING THE TWO NON-ZERO EXITS APART above).
 #
 # Resolution order (first hit wins — never regresses a machine where the CLI
 # already works today):
@@ -147,12 +241,133 @@
 # --brief-file`, the two newest hard CLI dependencies this plugin has.
 MIN_CLI_VERSION="0.19.0"
 
+# Sets $cli_marker to the absolute path of the once-per-session marker file
+# that gates the MIN_CLI_VERSION check, or returns non-zero when there is no
+# usable temporary directory — in which case the caller stays SILENT. A
+# marker that cannot be placed must degrade to no message at all, never to a
+# message on every hook.
+#
+# WHAT THE NAME IS KEYED ON, and why each component has to be there:
+#
+#   • MIN_CLI_VERSION — THE COMPONENT THAT CLOSES T-CLI-3. A `/reload-plugins`
+#     that activates a plugin carrying a RAISED floor yields a different key,
+#     so the check re-fires mid-session with no restart.
+#
+#   • the plugin root: `${CLAUDE_PLUGIN_ROOT}` if the host exports it, else
+#     `$0`. MEASURED (Claude Code 2.1.236, 2026-08-19): for a hook `command`,
+#     `${CLAUDE_PLUGIN_ROOT}` is a PATH PLACEHOLDER SUBSTITUTED INTO THE
+#     COMMAND STRING and is not necessarily an exported environment variable —
+#     a probe hook that dumped its whole environment saw it UNSET. `$0` is the
+#     shim's own path, which hooks.json writes as
+#     "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh", so it CARRIES the expanded
+#     plugin root by construction. Keying on the environment variable alone
+#     would have quietly keyed on an empty string. The plugin cache is
+#     version-pinned, so this component changes on any plugin version change
+#     — belt and braces with the floor above.
+#
+#   • the resolved PIPELINE_BIN path — a different CLI is a different verdict.
+#
+#   • a session-stable component, so the message is delivered AT MOST ONCE per
+#     session. The hook payload's `session_id` is unreachable from here:
+#     reading stdin would consume the relay's payload and break every relay
+#     (see the passthrough contract above), so this comes from the environment
+#     instead. MEASURED, not assumed, by dumping the environment of real
+#     SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop hooks
+#     within one session:
+#       - CLAUDE_CODE_SESSION_ID  IS set, and is IDENTICAL across all five
+#         events of that session. This is the one used.
+#       - CLAUDE_SESSION_ID is NOT set — it does not exist. Do not "correct"
+#         the name below to it.
+#       - $PPID was 1 for every hook process: the hook is reparented, so the
+#         parent pid is not session-stable. Worse, it is the SAME 1 in every
+#         session, so keying on it would suppress the warning permanently
+#         instead of once per session. It reads like a reasonable key and is
+#         not one.
+#     CLAUDE_CODE_SESSION_ID is UNDOCUMENTED, hence the fallback chain:
+#     CLAUDE_PID (also measured present, also session-stable), then the
+#     literal `no-session`. That last degrades to "once per plugin version per
+#     machine" rather than once per session — and because the plugin root
+#     above is version-pinned, a raised floor still re-fires. Degraded, never
+#     silent forever, and never a flood.
+#
+#     The fallback guards DISAPPEARANCE. The failure it does NOT guard, and
+#     the one that would actually cost something, is INSTABILITY: if this
+#     value ever became per-TURN rather than per-session, every invocation
+#     would compute a fresh key, and the throttle would silently become no
+#     throttle — a `--version` spawn on every tool call plus a notice on every
+#     tool call for anyone below the floor, which is exactly what the marker
+#     exists to prevent. Nothing here can detect that. If this variable's
+#     semantics are ever revisited, per-session stability is the property to
+#     re-verify; presence is not enough.
+# The marker must never land inside the plugin root (read-only at runtime) or
+# inside the consumer's project, so it goes to the system temporary directory:
+# TMPDIR, then TEMP, then TMP, then `/tmp`. All three names are checked
+# because none of them is universal — MEASURED on Windows Git Bash: `sh` sets
+# TEMP and TMP itself even when the parent process set neither, and sets no
+# TMPDIR at all, which is the reverse of a POSIX host. The same measurement
+# showed MSYS rewriting a `C:/x` value to `/c/x` on the way in, so the value
+# read here is not necessarily in the parent's path style and nothing may
+# assume it is. Each rung is tested for existence AND writability, since an
+# exported-but-stale TMPDIR is common.
+cli_marker_path() {
+  cli_marker=""
+
+  cmp_tmp=""
+  for cmp_dir in "${TMPDIR:-}" "${TEMP:-}" "${TMP:-}" /tmp; do
+    if [ -n "$cmp_dir" ] && [ -d "$cmp_dir" ] && [ -w "$cmp_dir" ]; then
+      cmp_tmp=$cmp_dir
+      break
+    fi
+  done
+  [ -n "$cmp_tmp" ] || return 1
+
+  cmp_session=${CLAUDE_CODE_SESSION_ID:-}
+  [ -n "$cmp_session" ] || cmp_session=${CLAUDE_PID:-}
+  [ -n "$cmp_session" ] || cmp_session=no-session
+
+  cmp_key="$MIN_CLI_VERSION|${CLAUDE_PLUGIN_ROOT:-$0}|$PIPELINE_BIN|$cmp_session"
+
+  # Fold the key into ONE filename-safe token in a single pass, using shell
+  # builtins only: no `tr`, no `sed`, no `md5sum`/`cksum`/`stat` — this shim
+  # resolves its own PATH and may not assume any external tool is reachable.
+  # Field-splitting on an IFS of the unsafe characters and rejoining with `_`
+  # via "$*" performs the whole substitution at once. `set -f` is essential,
+  # not tidiness: the unquoted expansion that does the splitting would
+  # otherwise ALSO do pathname expansion, and a `*` in a path would glob
+  # against the current directory. Every `/` and `\` becomes `_`, so the token
+  # can contain no path separator and no traversal. A tab or newline inside a
+  # path would survive into the name; on a filesystem that rejects it the
+  # claim below simply fails and we stay silent, which is the safe direction.
+  cmp_oldifs=$IFS
+  set -f
+  IFS='|/\:*?"<> '
+  set -- $cmp_key
+  IFS='_'
+  cmp_token="$*"
+  IFS=$cmp_oldifs
+  set +f
+
+  # LENGTH, since the name is two absolute paths plus a UUID: it measures
+  # ~180-200 characters in a real install against a typical NAME_MAX of 255,
+  # so there is headroom but not a lot of it. An unusually deep plugin cache
+  # or install prefix can exceed it, and the overflow degrades the same way
+  # every other marker failure does — the claim fails, the check is skipped,
+  # exit 0, relay untouched. Worth knowing that for THAT user the degradation
+  # is permanent and invisible: they would never see a floor warning at all.
+  # Shortening the key is not free, though — every component is load-bearing
+  # (floor = T-CLI-3, root = version pinning, bin = which CLI, session =
+  # throttle) and hashing one would need an external tool this file may not
+  # assume. Left as documented headroom rather than solved.
+  cli_marker="$cmp_tmp/pipeline-plugin-cli-check-$cmp_token"
+}
+
 # Compares $PIPELINE_BIN's own `--version` output against MIN_CLI_VERSION and
 # prints exactly one line to stderr if it is older; silent if current, newer,
 # or unparseable-but-still-warned-once (see below). Never touches the
 # caller's exit code or `$status` — version skew here must never block the
-# session, exactly like the mechanism above. Callers must gate on `--loud`
-# themselves; this function does not check `$mode`.
+# session, exactly like the mechanism above. It sets `cmcv_warned` when it
+# printed something, and the CALLER decides what that means for the exit
+# status; this function neither exits nor checks `$mode`.
 #
 # `--version`'s actual output shape was checked against a real install, not
 # assumed: a bare `N.N.N`, nothing else, exit 0. Anything that does not fit
@@ -166,6 +381,7 @@ MIN_CLI_VERSION="0.19.0"
 # has shipped that exact class of bug before), even though the real CLI
 # verified here does not emit one.
 check_min_cli_version() {
+  cmcv_warned=""
   cmcv_installed=$("$PIPELINE_BIN" --version 2>&1 </dev/null)
   cmcv_cr=$(printf '\r')
   cmcv_installed=${cmcv_installed%"$cmcv_cr"}
@@ -193,6 +409,7 @@ check_min_cli_version() {
 
   if [ -z "$cmcv_shape_ok" ]; then
     printf '%s\n' "pipeline plugin: could not read the installed 'pipeline' CLI's version (--version printed '$cmcv_installed') - skipping the minimum-version check for this session; if something behaves oddly, upgrade with 'bun add -g @baizor/pipeline' (or 'npm i -g @baizor/pipeline')" >&2
+    cmcv_warned="yes"
     return
   fi
 
@@ -216,6 +433,7 @@ check_min_cli_version() {
 
   if [ -n "$cmcv_older" ]; then
     printf '%s\n' "pipeline plugin: the installed 'pipeline' CLI ($cmcv_installed) is older than this plugin needs (>= $MIN_CLI_VERSION) - upgrade with 'bun add -g @baizor/pipeline' (or 'npm i -g @baizor/pipeline')" >&2
+    cmcv_warned="yes"
   fi
 }
 
@@ -247,6 +465,11 @@ fi
 if [ -z "$PIPELINE_BIN" ]; then
   if [ "$mode" = "loud" ]; then
     printf '%s\n' "pipeline plugin: the 'pipeline' CLI is not installed (checked PATH, \$BUN_INSTALL/bin, ~/.bun/bin, /opt/homebrew/bin, /usr/local/bin) - install it with 'bun add -g @baizor/pipeline' (or 'npm i -g @baizor/pipeline'), or set BUN_INSTALL to its install directory; this plugin needs it for every skill, agent and hook" >&2
+    # Exit 1, NOT 0 (`w4`). On exit 0 this line reached the debug log and
+    # nobody else — see THE DELIVERY DEFECT above. Exit 1 is a non-blocking
+    # error on every event, and no relay ran on this path, so our stdout is
+    # empty and the line is delivered as a transcript notice.
+    exit 1
   fi
   exit 0
 fi
@@ -268,11 +491,74 @@ status=$?
 if [ "$status" -eq 0 ]; then
   # This CLI just answered `hook` successfully, so it is not the "no `hook`
   # subcommand at all" case the probe below classifies. It can still be older
-  # than MIN_CLI_VERSION — the check is scoped to --loud (SessionStart) only,
-  # both to avoid flooding every other hook and because it is the only entry
-  # a user can act on.
-  if [ "$mode" = "loud" ]; then
+  # than MIN_CLI_VERSION.
+  #
+  # Runs on EVERY invocation now, not only `--loud` (T-CLI-3 — see WHEN THE
+  # CHECK RUNS above), but at most ONCE per session per key, because the
+  # marker file is both the cache and the claim:
+  #   • `[ -e ]` short-circuits the common case with no fork and no spawn, so
+  #     a cache hit costs one test and nothing else;
+  #   • the `set -C` (noclobber) creation that follows is an ATOMIC O_EXCL
+  #     claim, so the two SessionStart entries — which Claude Code starts
+  #     CONCURRENTLY, observed in a real session — cannot both conclude that
+  #     they are the one that gets to speak.
+  #
+  # KNOWN LIMITATION, deliberately accepted: if the user UPGRADES the CLI
+  # mid-session the marker still holds the old verdict, because the key
+  # carries no CLI version — reading one is precisely the spawn this cache
+  # exists to avoid. We therefore stay silent for the rest of that session
+  # rather than warning again. Silence after a fix is fine; a false warning is
+  # not.
+  #
+  # Any failure to place the marker — no writable temp dir, a read-only one, a
+  # name the filesystem rejects — degrades to SILENCE. Never to a warning on
+  # every hook, and never to a non-zero exit.
+  #
+  # THE MARKER IS CLAIMED BEFORE THE SPAWN, AND THAT ORDERING IS LOAD-BEARING.
+  # `check_min_cli_version` runs `$PIPELINE_BIN --version` in a command
+  # substitution, which blocks until the CLI exits, and there is NO PORTABLE
+  # WAY TO BOUND THAT from POSIX sh: `timeout` is an external tool (absent on
+  # a stock macOS), `sleep`-plus-`kill` polling needs `sleep`, also external,
+  # and `read -t` is a bashism this file cannot use because it runs under dash
+  # on Linux. Depending on any of them would break the one assumption this
+  # whole shim exists to avoid — that PATH is usable.
+  #
+  # The host DOES cap a hook — but the cap is a deadline, not a rescue, and it
+  # is PER EVENT. MEASURED (Claude Code 2.1.236):
+  #   • UserPromptSubmit: a hook sleeping 70s was cancelled at 30s —
+  #     attachment `hook_cancelled`, `timedOut: true`, `timeoutMs: 30000`.
+  #   • PostToolUse: a hook sleeping 300s was NOT cancelled at all — the turn
+  #     took 318s end to end and no `timedOut` was recorded.
+  #
+  # Two things follow, and the second is why this matters here. Cancelling
+  # does NOT kill the process or shorten the wall clock: `durationMs` read
+  # 70619 for that 70s sleep, so DURATION ALONE LOOKS EXACTLY LIKE "no
+  # timeout" — which is how an earlier draft of this comment concluded there
+  # was none. `timedOut`/`timeoutMs`, in the same record, are what settle it.
+  # And exceeding the cap DISCARDS THE HOOK'S OUTPUT: the cancelled hook's
+  # stderr appeared ZERO times in the transcript. So on a short-capped event a
+  # wedged CLI does not delay our warning, it loses it silently — one more
+  # reason the check is worth nothing if the spawn can hang.
+  #
+  # What bounds the damage is this ordering. The marker is on disk before
+  # `--version` is ever spawned, so a CLI that wedges costs at most ONE
+  # invocation in that session: every later hook sees the marker, skips the
+  # check and spawns nothing, even if this one was cancelled mid-spawn. Before
+  # `w4` this spawn only happened at SessionStart; it can now land on any
+  # event this shim is wired to — `UserPromptSubmit`, the 30s-capped one
+  # above, among them — so the exposure moved from "once at startup" to "once
+  # per session, possibly mid-turn". Not to "every tool call".
+  #
+  # If that ever needs closing properly, the lever is `hooks.json`'s per-hook
+  # `timeout` field, not shell code here.
+  if cli_marker_path && [ ! -e "$cli_marker" ] && ( set -C; : > "$cli_marker" ) 2>/dev/null; then
     check_min_cli_version
+  fi
+  if [ -n "${cmcv_warned:-}" ]; then
+    # The line was printed, so make it audible: exit 1, never 2. Non-blocking
+    # on every event — the tool call, prompt or session proceeds exactly as it
+    # did when this path exited 0.
+    exit 1
   fi
   exit 0
 fi
@@ -307,8 +593,19 @@ esac
 
 if [ "$mode" = "loud" ]; then
   printf '%s\n' "pipeline plugin: the installed 'pipeline' CLI is too old for this plugin - it has no 'hook' command, so every Pipeline hook is inert (they are CLI subcommands since plugin v0.93.0); upgrade with 'bun add -g @baizor/pipeline' (or 'npm i -g @baizor/pipeline') and restart the session" >&2
+  # Exit 1 so the line is delivered at all (`w4`, THE DELIVERY DEFECT above).
+  # 1, not the relay's own status: whatever the old CLI exited with — 2, in
+  # the measured case — would BLOCK the tool call, which is the release
+  # blocker this whole branch exists to defuse. 1 is non-blocking on every
+  # event, so the session behaves exactly as it did when this exited 0; the
+  # only difference is that the user now hears about it.
+  exit 1
 fi
 
-# Exit 0 REGARDLESS of mode: the loud/quiet contract governs the message, not
-# the status. A non-zero here would block the tool call this hook observed.
+# Quiet mode: exit 0. The loud/quiet contract governs the message, and with no
+# message there is nothing to deliver — a non-zero here would still not block
+# (1 never does), but it would post an empty "hook error" notice for a
+# condition we deliberately chose not to report on this event. What must NOT
+# happen either way is propagating the original status: that is the blocked
+# tool call on every turn.
 exit 0
