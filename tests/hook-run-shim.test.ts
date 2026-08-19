@@ -90,7 +90,7 @@ import { describe, test, expect, afterAll } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readFileSync, readdirSync, rmSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const PLUGIN_ROOT = resolve(import.meta.dir, '..');
 const SCRIPT = join(PLUGIN_ROOT, 'hooks', 'run-hook.sh');
@@ -230,20 +230,29 @@ function runScript(
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
-/** Writes a copy of run-hook.sh with MIN_CLI_VERSION rewritten to `floor`.
+/** Writes run-hook.sh to `path` with MIN_CLI_VERSION rewritten to `floor`.
  *  This is exactly what a plugin upgrade ships — the floor is a literal in
- *  the shim — so a copy with a raised floor, run in the SAME session and the
- *  SAME temp dir, is a faithful simulation of `/reload-plugins` picking up a
- *  plugin that raised it. */
-function mkShimWithFloor(dir: string, floor: string): string {
+ *  the shim — so rewriting it and re-running in the SAME session and the SAME
+ *  temp dir simulates `/reload-plugins` picking up a plugin that raised it.
+ *
+ *  THE PATH IS A PARAMETER SO THE CALLER CAN KEEP IT FIXED, and that matters
+ *  more than it looks: `$0` is itself a component of the marker key, so a
+ *  "reloaded" copy written to a NEW directory would re-fire the check even if
+ *  floor-keying were completely broken. A test that moves the script proves
+ *  only that *something* in the key changed, and would stay green while
+ *  T-CLI-3 — this task's headline feature — silently regressed. Rewriting in
+ *  place at one path holds `$0` constant so the floor is the only variable. */
+function writeShimWithFloor(path: string, floor: string): void {
   const src = readFileSync(SCRIPT, 'utf-8');
-  const rewritten = src.replace(/^MIN_CLI_VERSION="[0-9.]+"$/m, `MIN_CLI_VERSION="${floor}"`);
-  if (rewritten === src) throw new Error('MIN_CLI_VERSION assignment not found in run-hook.sh — the rewrite silently did nothing');
-  mkdirSync(dir, { recursive: true });
-  const p = join(dir, 'run-hook.sh');
-  writeFileSync(p, rewritten);
-  chmodSync(p, 0o755);
-  return p;
+  const assignment = /^MIN_CLI_VERSION="[0-9.]+"$/m;
+  // Assert the PATTERN MATCHED, not that the text changed. Writing the floor
+  // the shim already declares is a legitimate call — the T-CLI-3 test opens
+  // with exactly that to establish its baseline — so a `rewritten === src`
+  // check would reject a correct no-op rewrite while still missing nothing.
+  if (!assignment.test(src)) throw new Error('MIN_CLI_VERSION assignment not found in run-hook.sh — the rewrite would have silently done nothing');
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, src.replace(assignment, `MIN_CLI_VERSION="${floor}"`));
+  chmodSync(path, 0o755);
 }
 
 /** The shim's own warning lines, isolated from anything a stub CLI printed. */
@@ -364,7 +373,6 @@ describe.skipIf(!SH)('run-hook.sh resolution chain (sh: ' + (SH ?? 'unavailable 
     // Claude Code 2.1.236, including a PreToolUse whose tool call still ran.
     // It must never become 2: 2 is the blocking status.
     expect(r.status).toBe(1);
-    expect(r.status).not.toBe(2);
     // Nothing on stdout: an empty stdout is what keeps the transcript
     // classification at `hook_non_blocking_error`. Schema-valid hook JSON
     // there would make Claude Code ignore the exit code and re-classify the
@@ -555,7 +563,6 @@ describe.skipIf(!SH)('run-hook.sh vs. an out-of-date CLI (plugin-thin release bl
     // plugin-thin release blocker. 1 is the only status that is both audible
     // and non-blocking.
     expect(r.status).toBe(1);
-    expect(r.status).not.toBe(2);
     expect(r.stdout).toBe('');
     const ours = ourLines(r.stderr);
     expect(ours.length).toBe(1); // one line, not a flood
@@ -701,7 +708,6 @@ describe.skipIf(!SH)('run-hook.sh minimum CLI version (B.2: hook-capable but too
     mkStubVersionedCli(pathDir, log, '0.1.0'); // below any real MIN_CLI_VERSION
     const r = run(['--loud', 'hook', 'session-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
     expect(r.status).toBe(1); // audible (w4) — and never 2, which would block
-    expect(r.status).not.toBe(2);
     expect(r.stdout).not.toContain('pipeline plugin:'); // the channel: NOT stdout-to-context
     const lines = ourLines(r.stderr);
     expect(lines.length).toBe(1); // exactly one line
@@ -764,8 +770,7 @@ describe.skipIf(!SH)('run-hook.sh minimum CLI version (B.2: hook-capable but too
     const log = join(dir, 'calls.log');
     mkStubVersionedCli(pathDir, log, 'not-a-version');
     const r = run(['--loud', 'hook', 'session-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
-    expect(r.status).toBe(1); // delivered (w4) …
-    expect(r.status).not.toBe(2); // … but unknown must never BLOCK
+    expect(r.status).toBe(1); // delivered (w4), and never 2 — unknown must not BLOCK
     const lines = ourLines(r.stderr);
     expect(lines.length).toBe(1); // said once, not silently swallowed
     expect(lines[0]).not.toContain('is older'); // not a false "too old" accusation
@@ -797,7 +802,6 @@ describe.skipIf(!SH)('run-hook.sh minimum CLI version (B.2: hook-capable but too
     chmodSync(p, 0o755);
     const r = run(['--loud', 'hook', 'session-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home') });
     expect(r.status).toBe(1);
-    expect(r.status).not.toBe(2);
     const lines = ourLines(r.stderr);
     expect(lines.length).toBe(1);
     expect(lines[0]).toContain('could not read');
@@ -888,13 +892,27 @@ describe.skipIf(!SH)('run-hook.sh once-per-session version marker (w4 / T-CLI-3)
     mkStubVersionedCli(pathDir, log, MIN_CLI_VERSION);
     const env = { PATH: pathDir, HOME: join(dir, 'unused-home'), TMPDIR: tmpdir, CLAUDE_CODE_SESSION_ID: 'session-reload' };
 
-    const before = run(['hook', 'analytics-relay'], env);
+    // ONE fixed path for every invocation below, rewritten in place between
+    // them. `$0` is a marker-key component in its own right, so a "reloaded"
+    // copy at a NEW path would re-fire even with floor-keying broken; holding
+    // the path constant makes MIN_CLI_VERSION the only thing that varies, and
+    // therefore the only thing that can explain the re-fire.
+    const shim = join(dir, 'plugin', 'hooks', 'run-hook.sh');
+
+    writeShimWithFloor(shim, MIN_CLI_VERSION);
+    const before = runScript(shim, ['hook', 'analytics-relay'], env);
     expect(before.status).toBe(0);
     expect(ourLines(before.stderr)).toEqual([]); // current floor: nothing to say
 
-    // Same session, same temp dir, same CLI — only the plugin changed.
-    const reloaded = mkShimWithFloor(join(dir, 'reloaded'), '99.0.0');
-    const after = runScript(reloaded, ['hook', 'analytics-relay'], env);
+    // Checked once already this session, so the marker is now claimed. If the
+    // re-fire below came from anything other than the floor, this proves the
+    // baseline it has to overcome.
+    const cached = runScript(shim, ['hook', 'analytics-relay'], env);
+    expect(ourLines(cached.stderr)).toEqual([]);
+
+    // Same session, same temp dir, same CLI, SAME PATH — only the floor moved.
+    writeShimWithFloor(shim, '99.0.0');
+    const after = runScript(shim, ['hook', 'analytics-relay'], env);
 
     const lines = ourLines(after.stderr);
     expect(lines.length, 'a raised floor must re-fire the check without a restart — this is T-CLI-3').toBe(1);
@@ -903,7 +921,7 @@ describe.skipIf(!SH)('run-hook.sh once-per-session version marker (w4 / T-CLI-3)
     expect(after.status).toBe(1);
 
     // …and it stays a once-per-session message under the NEW floor too.
-    const again = runScript(reloaded, ['hook', 'analytics-relay'], env);
+    const again = runScript(shim, ['hook', 'analytics-relay'], env);
     expect(ourLines(again.stderr)).toEqual([]);
     expect(again.status).toBe(0);
   }, 30000);
@@ -1029,11 +1047,25 @@ describe.skipIf(!SH)('run-hook.sh once-per-session version marker (w4 / T-CLI-3)
     const log = join(dir, 'calls.log');
     mkStubVersionedCli(pathDir, log, '0.1.0');
     const missing = join(dir, 'no-such-dir');
-    const r = run(['hook', 'analytics-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home'), TMPDIR: missing, TEMP: missing, TMP: missing });
-    expect([0, 1]).toContain(r.status);
-    expect(r.status).not.toBe(2); // never a block, whichever branch was taken
-    expect(r.stdout).toBe('RELAY-OK\n'); // the relay's own stdout, untouched
-    expect(readLog(log)).toContain('hook analytics-relay'); // the relay still ran
+    // This is the ONE test that deliberately drives the final `/tmp` rung, so
+    // it is also the one test whose marker lands outside a directory `mkTmp`
+    // allocated — `afterAll`'s cleanup cannot reach it, and repeated local
+    // runs otherwise accumulate zero-byte markers in the real shared /tmp
+    // (11 of them after a handful of runs, on a long-lived self-hosted runner
+    // unbounded). A unique session token makes the one file it creates
+    // identifiable, and `sh` removes it through the SAME `/tmp` the shim
+    // resolved — Node cannot name that path itself under MSYS.
+    const token = `session-notmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    try {
+      const r = run(['hook', 'analytics-relay'], { PATH: pathDir, HOME: join(dir, 'unused-home'), TMPDIR: missing, TEMP: missing, TMP: missing, CLAUDE_CODE_SESSION_ID: token });
+      expect([0, 1]).toContain(r.status);
+      expect(r.stdout).toBe('RELAY-OK\n'); // the relay's own stdout, untouched
+      expect(readLog(log)).toContain('hook analytics-relay'); // the relay still ran
+    } finally {
+      // Best-effort: the session token is the last key component, so the
+      // marker name ends with it and this glob can match nothing else.
+      spawnSync(SH!, ['-c', `rm -f /tmp/pipeline-plugin-cli-check-*${token}`], { encoding: 'utf8' });
+    }
   }, 30000);
 
   // ── the invariant that outranks every line above ─────────────────────────

@@ -45,9 +45,12 @@ exit blocks the tool call. `run-hook.sh` therefore does not blindly `exec` the
 `hook` shape any more: it runs it with the streams still inherited, and on a
 non-zero exit asks the CLI one read-only question — `pipeline hook --help`,
 which succeeds on a CLI that has the subcommand and is refused by one that does
-not. Version skew exits 0 (with one actionable upgrade line under `--loud`); a
-relay that genuinely failed still propagates its exit code, because a
-PreToolUse deny is a correct non-zero exit and must not be swallowed.
+not. Version skew exits **1** — never the old CLI's own 2, which is the blocked
+tool call this whole branch exists to defuse, and never 0, which is what made
+the upgrade line invisible until plugin 0.99.0 (see the channel note below) —
+with one actionable upgrade line under `--loud`; a relay that genuinely failed
+still propagates its exit code, because a PreToolUse deny is a correct non-zero
+exit and must not be swallowed.
 
 **A CLI that IS new enough to answer `hook` can still be too old** — that
 probe only proves the subcommand exists, not that it does everything a skill
@@ -55,13 +58,38 @@ now assumes (`runner: session`'s `pipeline next --brief-file` preflight above
 is the same idea, generalized). `run-hook.sh` declares one `MIN_CLI_VERSION`
 constant (plugin.json's schema has no field for an external prerequisite —
 T-CLI-1 — so this is the single place the floor lives) and compares it against
-`pipeline --version`, `--loud` only, and only once the primary `hook` call has
-already succeeded — which keeps this check and the one above structurally
-disjoint; a CLI old enough to fail the `hook --help` probe never reaches this
-one. Too old → one stderr line naming the upgrade command, the same channel
-the two lines above already use; current or newer → silence; a `--version`
-output that doesn't parse as the CLI's real shape (a bare `N.N.N`) → reported
-once as unknown, never as "too old".
+`pipeline --version` on **every** hook invocation, and only once the primary
+`hook` call has already succeeded — which keeps this check and the one above
+structurally disjoint; a CLI old enough to fail the `hook --help` probe never
+reaches this one. Too old → one stderr line naming the upgrade command, the
+same channel the two lines above already use; current or newer → silence; a
+`--version` output that doesn't parse as the CLI's real shape (a bare `N.N.N`)
+→ reported once as unknown, never as "too old".
+
+**Every invocation, not just `--loud`, and that is T-CLI-3.** `/reload-plugins`
+activates a plugin upgrade — and therefore a raised floor — mid-session, with
+no restart and **without re-firing SessionStart**, so a `--loud`-only check
+could only ever be re-fired by restarting. What keeps that affordable is a
+marker file in the system temp directory (`TMPDIR`/`TEMP`/`TMP`, never the
+plugin root and never the consumer project), keyed on the floor itself, the
+version-pinned plugin root, the resolved binary and the session: twenty hook
+invocations cost **one** `pipeline --version` spawn and produce **one** line,
+and a raised floor is a different key, so it re-fires at once. Upgrading the
+*CLI* mid-session keeps the old verdict and stays silent until the next
+session — deliberate, since silence after a fix is cheap and a false warning
+is not.
+
+**The channel is stderr, and it only reaches anyone because of the exit 1.**
+Claude Code routes a **zero**-exit hook's stderr to the debug log alone — not
+the transcript, not the user, not Claude — so every line described above was
+written and discarded until plugin 0.99.0. Exit 1 surfaces them as a
+`hook_non_blocking_error` and blocks nothing; exit 2 is the blocking status,
+which this shim never produces of its own. One residual gap, by design: if the
+relay on that one invocation wrote schema-valid `hookSpecificOutput` JSON to
+stdout, Claude Code applies the JSON and ignores the exit code, so the line is
+recorded but not surfaced. It fails toward silence, never toward a block, and
+the relay's own output is never lost. **A relay that writes plain text to
+stdout would break that** — see `run-hook.sh`'s own note before adding one.
 
 **Write scope with respect to the consumer project: STRICTLY inside
 `<project>/.pipeline/`.** The hooks only ever append to `.runtime/events.jsonl`

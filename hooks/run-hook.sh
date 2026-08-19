@@ -157,15 +157,34 @@
 # THE RESIDUAL GAP, stated rather than hidden: row 4. If the relay on the
 # invocation that happens to claim the once-per-session marker writes
 # schema-valid hook JSON to stdout, our line is recorded in the transcript but
-# not surfaced as a notice. Measured against the real CLI (0.24.0): all five
-# relays — session, analytics, stats, department-notifier, prompt-match —
-# write NOTHING to stdout on the ordinary path, and the `--loud` SessionStart
-# entry is `session-relay`, whose entire job is to append one line to the
-# project journal. The two that CAN emit additionalContext (department-
-# notifier, prompt-match) only do so when they have something to say. The gap
-# is therefore real but narrow, and it fails toward SILENCE — never toward a
-# block, and never toward a swallowed deny, because in that row the relay's
-# own JSON keeps deciding the outcome exactly as it does today.
+# not surfaced as a notice. It fails toward SILENCE — never toward a block,
+# never toward a swallowed deny — because in that row the relay's own JSON
+# still decides the outcome exactly as it does today.
+#
+# WHAT THE SAFETY ACTUALLY RESTS ON — read this before adding a relay.
+# It is NOT that the relays write nothing to stdout. Two of the five DO:
+# `department-notifier-relay` (pending department notifications) and
+# `prompt-match-relay` (a pipeline suggestion). What makes exit 1 safe is that
+# both write SCHEMA-VALID `hookSpecificOutput` JSON, i.e. row 4 — the relay's
+# own output survives untouched and only OUR line goes quiet.
+#
+# A relay writing PLAIN TEXT to stdout would be row 3, and row 3 is not merely
+# "our line is visible". Measured: exit 1 + plain-text stdout produced a
+# `hook_non_blocking_error` and NO `hook_additional_context` attachment at
+# all, while the same text as JSON produced both. So on an invocation that
+# also warns, exit 1 would DESTROY that relay's additionalContext — and on
+# SessionStart and UserPromptSubmit plain stdout IS the context channel. This
+# is a real constraint on any relay added later, not a stylistic one:
+# A RELAY MAY RETURN CONTEXT AS JSON, NEVER AS BARE TEXT.
+#
+# The narrowness is therefore in WHICH invocation speaks, not in the relays
+# being silent. The `--loud` SessionStart entry is `session-relay`, which
+# writes no stdout at all — but the two SessionStart entries race for the
+# marker (see the claim below), so the notifier can win it and, when it does
+# have a notification pending, absorb the warning into row 4. The entry that
+# would have delivered the line is throttled by then. The next session
+# re-fires, so the cost is one deferred warning and never a lost relay
+# payload.
 #
 # Usage: run-hook.sh [--loud] <args passed to `pipeline`>
 #   --loud   pipeline-not-found, and a CLI with no `hook` subcommand at all,
@@ -261,6 +280,16 @@ MIN_CLI_VERSION="0.19.0"
 #     machine" rather than once per session — and because the plugin root
 #     above is version-pinned, a raised floor still re-fires. Degraded, never
 #     silent forever, and never a flood.
+#
+#     The fallback guards DISAPPEARANCE. The failure it does NOT guard, and
+#     the one that would actually cost something, is INSTABILITY: if this
+#     value ever became per-TURN rather than per-session, every invocation
+#     would compute a fresh key, and the throttle would silently become no
+#     throttle — a `--version` spawn on every tool call plus a notice on every
+#     tool call for anyone below the floor, which is exactly what the marker
+#     exists to prevent. Nothing here can detect that. If this variable's
+#     semantics are ever revisited, per-session stability is the property to
+#     re-verify; presence is not enough.
 # The marker must never land inside the plugin root (read-only at runtime) or
 # inside the consumer's project, so it goes to the system temporary directory:
 # TMPDIR, then TEMP, then TMP, then `/tmp`. All three names are checked
@@ -309,6 +338,17 @@ cli_marker_path() {
   IFS=$cmp_oldifs
   set +f
 
+  # LENGTH, since the name is two absolute paths plus a UUID: it measures
+  # ~180-200 characters in a real install against a typical NAME_MAX of 255,
+  # so there is headroom but not a lot of it. An unusually deep plugin cache
+  # or install prefix can exceed it, and the overflow degrades the same way
+  # every other marker failure does — the claim fails, the check is skipped,
+  # exit 0, relay untouched. Worth knowing that for THAT user the degradation
+  # is permanent and invisible: they would never see a floor warning at all.
+  # Shortening the key is not free, though — every component is load-bearing
+  # (floor = T-CLI-3, root = version pinning, bin = which CLI, session =
+  # throttle) and hashing one would need an external tool this file may not
+  # assume. Left as documented headroom rather than solved.
   cli_marker="$cmp_tmp/pipeline-plugin-cli-check-$cmp_token"
 }
 
@@ -464,6 +504,31 @@ if [ "$status" -eq 0 ]; then
   # Any failure to place the marker — no writable temp dir, a read-only one, a
   # name the filesystem rejects — degrades to SILENCE. Never to a warning on
   # every hook, and never to a non-zero exit.
+  #
+  # THE MARKER IS CLAIMED BEFORE THE SPAWN, AND THAT ORDERING IS LOAD-BEARING.
+  # `check_min_cli_version` runs `$PIPELINE_BIN --version` in a command
+  # substitution, which blocks until the CLI exits, and there is NO PORTABLE
+  # WAY TO BOUND THAT from POSIX sh: `timeout` is an external tool (absent on
+  # a stock macOS), `sleep`-plus-`kill` polling needs `sleep`, also external,
+  # and `read -t` is a bashism this file cannot use because it runs under dash
+  # on Linux. Depending on any of them would break the one assumption this
+  # whole shim exists to avoid — that PATH is usable.
+  #
+  # Do not assume the host rescues a wedged spawn either. MEASURED (Claude
+  # Code 2.1.236): a PostToolUse hook that slept 300s was NOT killed — the
+  # turn took 318s end to end. There is no default hook timeout to fall back
+  # on, so "it stalls until the platform's timeout" is not true here.
+  #
+  # What bounds the damage is this ordering. The marker is on disk before
+  # `--version` is ever spawned, so a CLI that wedges costs at most ONE
+  # invocation in that session: every later hook sees the marker, skips the
+  # check and spawns nothing, even if this one was killed mid-spawn. Before
+  # `w4` this spawn only happened at SessionStart; it can now land on a
+  # PostToolUse, so the exposure moved from "once at startup" to "once per
+  # session, possibly mid-turn" — not to "every tool call".
+  #
+  # If that ever needs closing properly, the lever is `hooks.json`'s per-hook
+  # `timeout` field, not shell code here.
   if cli_marker_path && [ ! -e "$cli_marker" ] && ( set -C; : > "$cli_marker" ) 2>/dev/null; then
     check_min_cli_version
   fi
