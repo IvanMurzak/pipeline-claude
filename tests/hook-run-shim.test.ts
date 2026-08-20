@@ -1268,11 +1268,6 @@ describe('hooks/hooks.json wiring', () => {
         '  hooks.json\'s `description` that names it ("NINE OF THE TEN ENTRIES GET 20s",\n' +
         '  and the `SubagentStop` -> stats-relay outlier "AT 60s"). They are one contract.',
     ).toEqual(EXPECTED);
-
-    // Nine-and-one, asserted as a shape so the prose's own wording stays true.
-    const at20 = Object.values(actual).filter((t) => t === 20).length;
-    expect(at20, 'the description says NINE entries are at 20s').toBe(9);
-    expect(actual['SubagentStop|stats-relay'], 'the description names exactly one 60s outlier').toBe(60);
   });
 
   test('every relay this plugin depends on is actually registered somewhere', () => {

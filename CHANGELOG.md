@@ -18,15 +18,24 @@ every event the plugin registers, except `UserPromptSubmit`, which defaults to 3
 `hooks.json`'s per-hook `timeout` field, not shell code here"* — and nobody had pulled it. All
 ten now carry one.
 
-**What a timeout does here is narrower than it sounds, and worth knowing before you rely on it:
-expiry is abandonment, not termination.** `run-hook.sh` measured this against Claude Code
-2.1.236 — a hook sleeping 70 s under a 30 s cap was marked cancelled (`timedOut: true`) and its
-`durationMs` still read **70619**. The process ran the full 70 seconds. The relay is not killed,
-and on this path it is not even the shim's direct child: the `hook` shape deliberately spawns
-rather than `exec`s, so the CLI is a *grandchild*. What the cap buys is that **Claude Code stops
-waiting and discards the hook's output** — your turn is released while the relay finishes in the
-background. Nothing it was midway through writing gets interrupted, and a `PreToolUse` timeout
-does not block the tool.
+**What a timeout does here is narrower than it sounds, and an explicit `timeout` does not behave
+like the default cap.** Under the *default* cap, expiry is abandonment: `run-hook.sh` measured a
+hook sleeping 70 s under a 30 s default cap as cancelled (`timedOut: true`) with its `durationMs`
+still reading **70619** — it ran the full 70 seconds. An **explicitly configured** `timeout`, which
+is what this release ships, is different: measured directly against Claude Code 2.1.237 with a
+`"timeout": 5` on a hook heartbeating every 500 ms, the hook process was **killed 5,375 ms into
+its own run**, its post-sleep marker never written, while the session carried on for another
+3.5 s.
+
+**The relays survive that anyway, for a structural reason.** The `hook` shape deliberately
+*spawns* rather than `exec`s, so the CLI is a **grandchild** of Claude Code. In the same probe —
+same 5 s cap, a wrapper reproducing that shape — the wrapper was killed with its end marker
+unwritten while **the grandchild ran to completion**: all forty heartbeats across 39 seconds,
+writing its own end marker long after the shim was gone. So your turn is released, the hook's
+output is discarded, and the relay finishes in the background uninterrupted. That last part is a
+property of the spawn-not-`exec` shape, **not** of the timeout — a hook that `exec`ed the relay,
+or did the work in the shim itself, *would* be cut off mid-write. A `PreToolUse` timeout does not
+block the tool either.
 
 **Nine of the ten get 20 s.** Measured end to end through the shim on a Windows 11 box against a
 63 MB transcript: the hot path — `PostToolUse` → analytics — costs **291 ms** alone, **1.24 s**
