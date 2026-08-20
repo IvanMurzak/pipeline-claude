@@ -1209,10 +1209,10 @@ describe('hooks/hooks.json wiring', () => {
     // SubagentStop → stats — the one unbudgeted transcript walk — at 11.1s
     // with twenty stale records and eight hooks at once. The UPPER bound is
     // the point of the whole change: it makes "a hook may hold a turn for
-    // minutes" unrepresentable in this file. 60 is deliberately reachable —
-    // SubagentStop → stats sits exactly there, because cancelling it mid-pass
-    // can truncate a project's runs.jsonl (the rewrite is non-atomic), so it
-    // is the one entry that trades tightness for safety.
+    // minutes" unrepresentable in this file. 60 is deliberately reachable:
+    // SubagentStop → stats sits exactly there because its cost scales with
+    // stale records × transcript bytes (9.1s at fifty records on 63MB), and
+    // a backlogged .stats tree with a larger transcript runs past 45s.
     const MIN_TIMEOUT_S = 5;
     const MAX_TIMEOUT_S = 60;
     for (const hook of registered) {
@@ -1234,6 +1234,45 @@ describe('hooks/hooks.json wiring', () => {
           '  minutes, which is the exposure the timeouts were added to close.',
       ).toBe(true);
     }
+
+    // And the VALUES themselves, not merely the range. hooks.json's own
+    // `description` states them individually ("NINE OF THE TEN ENTRIES GET
+    // 20s", the outlier "AT 60s"), and in this project that prose is a parsed
+    // contract rather than a comment — so the range check alone would let the
+    // file and its own documentation drift apart while CI stayed green. That
+    // is precisely the failure this suite exists to prevent, one level up.
+    // Retuning a value is therefore a deliberate two-file edit: change the
+    // number here and the sentence there, together.
+    const EXPECTED: Record<string, number> = {
+      'Stop|analytics-relay': 20,
+      'Stop|stats-relay': 20,
+      'SubagentStop|analytics-relay': 20,
+      'SubagentStop|stats-relay': 60, // the only unbudgeted transcript walk
+      'SessionStart|session-relay': 20,
+      'SessionStart|department-notifier-relay': 20,
+      'PreToolUse|analytics-relay': 20,
+      'PostToolUse|analytics-relay': 20,
+      'UserPromptSubmit|prompt-match-relay': 20,
+      'Notification|analytics-relay': 20,
+    };
+    const actual: Record<string, number> = {};
+    for (const hook of registered) {
+      const relay = RELAYS.find((r) => hook.command.endsWith(` hook ${r}`));
+      expect(relay, `no \`hook <relay>\` in: ${hook.command}`).toBeDefined();
+      actual[`${hook.event}|${relay}`] = hook.timeout as number;
+    }
+    expect(
+      actual,
+      'hooks.json timeout values no longer match the ones its `description` states.\n' +
+        '  If this change is intended, update BOTH: the value here and the sentence in\n' +
+        '  hooks.json\'s `description` that names it ("NINE OF THE TEN ENTRIES GET 20s",\n' +
+        '  and the `SubagentStop` -> stats-relay outlier "AT 60s"). They are one contract.',
+    ).toEqual(EXPECTED);
+
+    // Nine-and-one, asserted as a shape so the prose's own wording stays true.
+    const at20 = Object.values(actual).filter((t) => t === 20).length;
+    expect(at20, 'the description says NINE entries are at 20s').toBe(9);
+    expect(actual['SubagentStop|stats-relay'], 'the description names exactly one 60s outlier').toBe(60);
   });
 
   test('every relay this plugin depends on is actually registered somewhere', () => {

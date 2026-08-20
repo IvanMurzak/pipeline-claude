@@ -13,10 +13,20 @@ describes the file rather than recording anything. Earlier history still is in `
 **Every one of this plugin's ten hooks could stall a turn for up to ten minutes, and none of
 them ever set a limit.** `timeout` is a real per-hook field in `hooks.json`, in seconds, and
 this file set it nowhere — so every hook inherited Claude Code's default: **600 seconds** on
-every event the plugin registers, except `UserPromptSubmit`, which defaults to 30s. Nothing in
-the plugin bounded a relay that hung. `hooks/run-hook.sh` had already written down the remedy in
-its own comments — *"the lever is `hooks.json`'s per-hook `timeout` field, not shell code here"*
-— and nobody had pulled it. All ten now carry one.
+every event the plugin registers, except `UserPromptSubmit`, which defaults to 30s.
+`hooks/run-hook.sh` had already named the remedy in its own comments — *"the lever is
+`hooks.json`'s per-hook `timeout` field, not shell code here"* — and nobody had pulled it. All
+ten now carry one.
+
+**What a timeout does here is narrower than it sounds, and worth knowing before you rely on it:
+expiry is abandonment, not termination.** `run-hook.sh` measured this against Claude Code
+2.1.236 — a hook sleeping 70 s under a 30 s cap was marked cancelled (`timedOut: true`) and its
+`durationMs` still read **70619**. The process ran the full 70 seconds. The relay is not killed,
+and on this path it is not even the shim's direct child: the `hook` shape deliberately spawns
+rather than `exec`s, so the CLI is a *grandchild*. What the cap buys is that **Claude Code stops
+waiting and discards the hook's output** — your turn is released while the relay finishes in the
+background. Nothing it was midway through writing gets interrupted, and a `PreToolUse` timeout
+does not block the tool.
 
 **Nine of the ten get 20 s.** Measured end to end through the shim on a Windows 11 box against a
 63 MB transcript: the hot path — `PostToolUse` → analytics — costs **291 ms** alone, **1.24 s**
@@ -27,10 +37,11 @@ matching is flat too: 200 pipeline manifests cost no more than one. The departme
 **not** the slow relay you might expect — its daemon spawn is detached, so ensuring the daemon
 runs costs what skipping it costs (354–1149 ms either way).
 
-**One entry gets 60 s: `SubagentStop` → stats-relay.** It is the only path the CLI's own source
-declares *unbudgeted* (its `Stop` sibling self-bounds at `STOP_BUDGET_MS = 4000` and measures
-under 1.6 s even with fifty stale records — hence 20 s there). Its cost scales with **stale
-records × transcript bytes**, not either alone:
+**One entry gets 60 s: `SubagentStop` → stats-relay**, and the reason is measured scaling. It is
+the only path the CLI's own source declares *unbudgeted* — its `Stop` sibling self-bounds at
+`STOP_BUDGET_MS = 4000` and measures under 1.6 s even with fifty stale records, which is why
+that sibling sits on the floor. This one's cost scales with **stale records × transcript bytes**,
+not either alone:
 
 | `tokens: null` records to reconcile, 63 MB transcript | duration |
 | --- | --- |
@@ -40,28 +51,19 @@ records × transcript bytes**, not either alone:
 | 50 | **9.1 s** |
 | 20, with eight hooks competing for the box | **11.1 s** |
 
-A `.stats` tree that has built up a backlog while a larger transcript is in play extrapolates
-past 45 s, which is why this entry is not on the floor.
+A `.stats` tree carrying a backlog while a larger transcript is in play extrapolates past 45 s,
+so this entry is not put on the floor.
 
-**And cancelling that one is not free — which is the reason for the headroom.**
-`statsEnrichTokens` rewrites `runs.jsonl` with a plain non-atomic `writeFileSync` (no temp file,
-no rename), so a timeout landing inside that write can leave a project's run history
-**truncated**. The window is milliseconds wide and the odds are low, but the hazard is *created*
-by this change and did not exist while the default was ten minutes, so it is recorded here
-rather than discovered later. The proper fix — a `budgetMs` on the SubagentStop rung, or an
-atomic write-and-rename — belongs in the CLI repo; a generous timeout is the mitigation
-available from this file.
-
-Cancelling the other nine **is** safe: Claude Code discards a timed-out hook's output, a
-`PreToolUse` timeout does *not* block the tool, and each is best-effort telemetry whose
-cancelled fold just leaves a record for a later stop to fill.
+Cancelling any of the ten is safe: each is best-effort telemetry, an abandoned fold just leaves
+the record null for a later stop to fill, and none is a blocking control.
 
 **`UserPromptSubmit` is the one cap lowered rather than introduced** — 30 s to 20 s. It holds
 your prompt for as long as it runs, and it measured well under 1 s even with 200 manifests.
 
-`tests/hook-run-shim.test.ts` now fails CI if any hook omits a `timeout` or sets one outside
-5–60 s, the same way it already guards the `"shell": "bash"` pin — so a hook added later cannot
-quietly reintroduce the ten-minute exposure on one event while every other event looks fixed.
+`tests/hook-run-shim.test.ts` pins these exact values — nine at 20 s and the one 60 s outlier,
+named individually — as well as the 5–60 s range, the same way it already guards the
+`"shell": "bash"` pin. A hook added later cannot quietly reintroduce the ten-minute exposure,
+and the values cannot drift away from the prose that documents them without CI saying so.
 
 Also corrected: `CLAUDE.md` claimed that bumping the plugin version "requires a second commit in
 the parent marketplace repo to bump the submodule pointer." It does not, and that line misled a
