@@ -13,8 +13,23 @@
 # `apps/pipeline-cli` directory it built from. The npm package
 # `@baizor/pipeline` is released from its own repository, `IvanMurzak/pipeline`,
 # by that repo's `.github/workflows/release.yml` — which has its own npm Trusted
-# Publisher registration. This workflow no longer publishes anything to npm; a
-# plugin release is a git tag, because that is what the marketplace resolves.
+# Publisher registration. This workflow no longer publishes anything to npm; it
+# verifies and tags, and nothing else.
+#
+# ⚠ THE TAG DOES NOT DELIVER THE PLUGIN — MERGING TO `main` DOES. The
+# marketplace (`IvanMurzak/pipeline-claude-marketplace`) resolves this plugin by
+# `url` + `ref: main` — no submodule, no pointer, no version pin — so whatever
+# `main` holds is what users install, and a bumped `.claude-plugin/plugin.json`
+# reaches them by itself as soon as it lands there (Claude Code caches by
+# `name@version`). What this workflow produces is versioning and release notes.
+# Running it is therefore never the step that ships a fix, and skipping it never
+# withholds one.
+#
+# Separately, the parent monorepo (`IvanMurzak/ai-pipeline`) DOES pin this repo
+# as a submodule and DOES need a pointer bump. That is a development concern and
+# is NOT on the distribution path — do not conflate the two. `CLAUDE.md`
+# ("bump `version` in `plugin.json`") states the same rules from the authoring
+# side; keep the two in agreement.
 #
 # Consequently there is NO `target` input any more. It existed only to tell the
 # two artifacts apart, and inferring nothing is better than offering a choice
