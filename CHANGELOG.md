@@ -32,10 +32,17 @@ its own run**, its post-sleep marker never written, while the session carried on
 same 5 s cap, a wrapper reproducing that shape — the wrapper was killed with its end marker
 unwritten while **the grandchild ran to completion**: all forty heartbeats across 39 seconds,
 writing its own end marker long after the shim was gone. So your turn is released, the hook's
-output is discarded, and the relay finishes in the background uninterrupted. That last part is a
-property of the spawn-not-`exec` shape, **not** of the timeout — a hook that `exec`ed the relay,
-or did the work in the shim itself, *would* be cut off mid-write. A `PreToolUse` timeout does not
-block the tool either.
+output is discarded, and the relay finishes in the background uninterrupted.
+
+**That last part is a property of the process shape, not of the timeout — and the shapes don't
+all behave alike.** Work done *in the shim process itself* **is** cut off: the control died
+3,457 ms into a 5 s cap with its end marker unwritten. An `exec`ed relay, though, **survived** on
+Windows — all forty heartbeats over 52 seconds — because Git Bash is MSYS/Cygwin and cannot
+replace a Win32 process image: its `exec` starts a *new* process and exits the original, so the
+kill lands on a PID that has already gone. On POSIX, where `exec` genuinely replaces the image
+and keeps the PID, an `exec`ed relay would be expected to be cut off — **expected, not
+measured**. The spawn stays regardless: it is the shape the grandchild measurement actually
+covers. A `PreToolUse` timeout does not block the tool either.
 
 **Nine of the ten get 20 s.** Measured end to end through the shim on a Windows 11 box against a
 63 MB transcript: the hot path — `PostToolUse` → analytics — costs **291 ms** alone, **1.24 s**
