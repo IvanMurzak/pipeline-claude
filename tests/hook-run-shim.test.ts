@@ -1178,6 +1178,98 @@ describe('hooks/hooks.json wiring', () => {
     }
   });
 
+  test('EVERY command hook carries an explicit `timeout`, in a sane range', () => {
+    // Same shape, and the same argument, as the `"shell": "bash"` guard above.
+    //
+    // Until this assertion existed, NO hook in this file set `timeout` at all,
+    // so every one inherited Claude Code's default: 600s — TEN MINUTES — on
+    // every event registered here except `UserPromptSubmit`, which defaults to
+    // 30s. A wedged relay could hold a turn for ten minutes. `run-hook.sh`
+    // named this exact remedy in its own comments ("the lever is hooks.json's
+    // per-hook `timeout` field, not shell code here") and prose does not fail
+    // CI, so a hook added without one would reintroduce the ten-minute
+    // exposure on that single event while every other event looked fixed —
+    // the identical failure mode the bash pin's guard exists to prevent.
+    const raw = readFileSync(join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout?: unknown }> }>>;
+    };
+    const registered: Array<{ event: string; command: string; timeout?: unknown }> = [];
+    for (const [event, entries] of Object.entries(parsed.hooks)) {
+      for (const entry of entries) {
+        for (const hook of entry.hooks) registered.push({ event, ...hook });
+      }
+    }
+    expect(registered.length).toBe(10);
+
+    // The bounds are the contract, not decoration. The LOWER bound keeps a
+    // future edit from setting something so tight that a healthy relay is
+    // cancelled on a loaded machine: the hot path (PostToolUse → analytics)
+    // was measured at 4.5s with thirty-two hooks competing for the box, and
+    // SubagentStop → stats — the one unbudgeted transcript walk — at 11.1s
+    // with twenty stale records and eight hooks at once. The UPPER bound is
+    // the point of the whole change: it makes "a hook may hold a turn for
+    // minutes" unrepresentable in this file. 60 is deliberately reachable:
+    // SubagentStop → stats sits exactly there because its cost scales with
+    // stale records × transcript bytes (9.1s at fifty records on 63MB), and
+    // a backlogged .stats tree with a larger transcript runs past 45s.
+    const MIN_TIMEOUT_S = 5;
+    const MAX_TIMEOUT_S = 60;
+    for (const hook of registered) {
+      expect(
+        typeof hook.timeout,
+        `hooks.json ${hook.event} hook has no \`timeout\`: ${hook.command}\n` +
+          '  Add a `"timeout": <seconds>` beside `"type"`, `"command"` and `"shell"`.\n' +
+          '  Without it the hook inherits Claude Code\'s default — 600s on every event\n' +
+          '  here except UserPromptSubmit (30s) — so a wedged relay holds the turn for\n' +
+          '  ten minutes. See hooks.json\'s `description` for the measured budget.',
+      ).toBe('number');
+      const t = hook.timeout as number;
+      expect(Number.isInteger(t), `hooks.json ${hook.event} timeout is not a whole number of seconds: ${t}`).toBe(true);
+      expect(
+        t >= MIN_TIMEOUT_S && t <= MAX_TIMEOUT_S,
+        `hooks.json ${hook.event} timeout ${t}s is outside ${MIN_TIMEOUT_S}-${MAX_TIMEOUT_S}s: ${hook.command}\n` +
+          `  Below ${MIN_TIMEOUT_S}s a healthy relay gets cancelled on a loaded machine.\n` +
+          `  Above ${MAX_TIMEOUT_S}s this file is back to letting a hook stall a turn for\n` +
+          '  minutes, which is the exposure the timeouts were added to close.',
+      ).toBe(true);
+    }
+
+    // And the VALUES themselves, not merely the range. hooks.json's own
+    // `description` states them individually ("NINE OF THE TEN ENTRIES GET
+    // 20s", the outlier "AT 60s"), and in this project that prose is a parsed
+    // contract rather than a comment — so the range check alone would let the
+    // file and its own documentation drift apart while CI stayed green. That
+    // is precisely the failure this suite exists to prevent, one level up.
+    // Retuning a value is therefore a deliberate two-file edit: change the
+    // number here and the sentence there, together.
+    const EXPECTED: Record<string, number> = {
+      'Stop|analytics-relay': 20,
+      'Stop|stats-relay': 20,
+      'SubagentStop|analytics-relay': 20,
+      'SubagentStop|stats-relay': 60, // the only unbudgeted transcript walk
+      'SessionStart|session-relay': 20,
+      'SessionStart|department-notifier-relay': 20,
+      'PreToolUse|analytics-relay': 20,
+      'PostToolUse|analytics-relay': 20,
+      'UserPromptSubmit|prompt-match-relay': 20,
+      'Notification|analytics-relay': 20,
+    };
+    const actual: Record<string, number> = {};
+    for (const hook of registered) {
+      const relay = RELAYS.find((r) => hook.command.endsWith(` hook ${r}`));
+      expect(relay, `no \`hook <relay>\` in: ${hook.command}`).toBeDefined();
+      actual[`${hook.event}|${relay}`] = hook.timeout as number;
+    }
+    expect(
+      actual,
+      'hooks.json timeout values no longer match the ones its `description` states.\n' +
+        '  If this change is intended, update BOTH: the value here and the sentence in\n' +
+        '  hooks.json\'s `description` that names it ("NINE OF THE TEN ENTRIES GET 20s",\n' +
+        '  and the `SubagentStop` -> stats-relay outlier "AT 60s"). They are one contract.',
+    ).toEqual(EXPECTED);
+  });
+
   test('every relay this plugin depends on is actually registered somewhere', () => {
     // The inverse of the check above: a relay that no hook event invokes is a
     // relay that silently never runs, which for the journal writers means the

@@ -78,8 +78,21 @@ Use semver:
   template version (e.g., CLAUDE.md stanza v4 → v5).
 - Major bump (0.2.0 → 1.0.0): reserved for a stable public release.
 
-Don't forget: bumping here requires a second commit in the parent
-marketplace repo to bump the submodule pointer.
+**Merging the bump to `main` IS the distribution step.** The marketplace
+(`IvanMurzak/pipeline-claude-marketplace`) resolves this plugin by
+`url` + `ref: main` — no submodule, no pointer, no version pin — so a
+bump that lands on `main` reaches users by itself. Don't go hunting for
+a pointer commit over there; there isn't one to make.
+
+Separately, the parent monorepo (`IvanMurzak/ai-pipeline`) *does* pin
+this repo as a submodule and *does* need a pointer bump. That is a
+development concern and is **not** on the distribution path — skipping
+it delays no user.
+
+A tagged release is cut with the `release-cli.yml` workflow
+(`workflow_dispatch`; the `version` input must match `plugin.json`
+exactly, and the tag is `v<version>`). The tag is versioning and
+release notes — **not** what delivers the plugin.
 
 ## Editing rules
 

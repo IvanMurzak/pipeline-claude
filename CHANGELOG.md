@@ -8,6 +8,87 @@ repository at `apps/pipeline-cli/` and released from it.** It does not any more 
 Historical entries are left exactly as written; only this masthead is updated, because it
 describes the file rather than recording anything. Earlier history still is in `git log`.
 
+## plugin 0.99.1 — a stuck hook can no longer hold your session for ten minutes
+
+**Every one of this plugin's ten hooks could stall a turn for up to ten minutes, and none of
+them ever set a limit.** `timeout` is a real per-hook field in `hooks.json`, in seconds, and
+this file set it nowhere — so every hook inherited Claude Code's default: **600 seconds** on
+every event the plugin registers, except `UserPromptSubmit`, which defaults to 30s.
+`hooks/run-hook.sh` had already named the remedy in its own comments — *"the lever is
+`hooks.json`'s per-hook `timeout` field, not shell code here"* — and nobody had pulled it. All
+ten now carry one.
+
+**What a timeout does here is narrower than it sounds, and an explicit `timeout` does not behave
+like the default cap.** Under the *default* cap, expiry is abandonment: `run-hook.sh` measured a
+hook sleeping 70 s under a 30 s default cap as cancelled (`timedOut: true`) with its `durationMs`
+still reading **70619** — it ran the full 70 seconds. An **explicitly configured** `timeout`, which
+is what this release ships, is different: measured directly against Claude Code 2.1.237 with a
+`"timeout": 5` on a hook heartbeating every 500 ms, the hook process was **killed 5,375 ms into
+its own run**, its post-sleep marker never written, while the session carried on for another
+3.5 s.
+
+**The relays survive that anyway, for a structural reason.** The `hook` shape deliberately
+*spawns* rather than `exec`s, so the CLI is a **grandchild** of Claude Code. In the same probe —
+same 5 s cap, a wrapper reproducing that shape — the wrapper was killed with its end marker
+unwritten while **the grandchild ran to completion**: all forty heartbeats across 39 seconds,
+writing its own end marker long after the shim was gone. So your turn is released, the hook's
+output is discarded, and the relay finishes in the background uninterrupted.
+
+**That last part is a property of the process shape, not of the timeout — and the shapes don't
+all behave alike.** Work done *in the shim process itself* **is** cut off: the control died
+3,457 ms into a 5 s cap with its end marker unwritten. An `exec`ed relay, though, **survived** on
+Windows — all forty heartbeats over 52 seconds — because Git Bash is MSYS/Cygwin and cannot
+replace a Win32 process image: its `exec` starts a *new* process and exits the original, so the
+kill lands on a PID that has already gone. On POSIX, where `exec` genuinely replaces the image
+and keeps the PID, an `exec`ed relay would be expected to be cut off — **expected, not
+measured**. The spawn stays regardless: it is the shape the grandchild measurement actually
+covers. A `PreToolUse` timeout does not block the tool either.
+
+**Nine of the ten get 20 s.** Measured end to end through the shim on a Windows 11 box against a
+63 MB transcript: the hot path — `PostToolUse` → analytics — costs **291 ms** alone, **1.24 s**
+with eight hooks at once and **4.49 s** with thirty-two, so 20 s is ~4.4× the worst contended
+case. Transcript *size* barely matters to analytics (2 KB, 16 MB and 64 MB all land between
+150 ms and 550 ms — it tails from a stored byte offset rather than re-reading), and prompt
+matching is flat too: 200 pipeline manifests cost no more than one. The department notifier is
+**not** the slow relay you might expect — its daemon spawn is detached, so ensuring the daemon
+runs costs what skipping it costs (354–1149 ms either way).
+
+**One entry gets 60 s: `SubagentStop` → stats-relay**, and the reason is measured scaling. It is
+the only path the CLI's own source declares *unbudgeted* — its `Stop` sibling self-bounds at
+`STOP_BUDGET_MS = 4000` and measures under 1.6 s even with fifty stale records, which is why
+that sibling sits on the floor. This one's cost scales with **stale records × transcript bytes**,
+not either alone:
+
+| `tokens: null` records to reconcile, 63 MB transcript | duration |
+| --- | --- |
+| 0 | 0.9 s |
+| 5 | 1.8 s |
+| 20 | 4.6 s |
+| 50 | **9.1 s** |
+| 20, with eight hooks competing for the box | **11.1 s** |
+
+A `.stats` tree carrying a backlog while a larger transcript is in play extrapolates past 45 s,
+so this entry is not put on the floor.
+
+Cancelling any of the ten is safe: each is best-effort telemetry, an abandoned fold just leaves
+the record null for a later stop to fill, and none is a blocking control.
+
+**`UserPromptSubmit` is the one cap lowered rather than introduced** — 30 s to 20 s. It holds
+your prompt for as long as it runs, and it measured well under 1 s even with 200 manifests.
+
+`tests/hook-run-shim.test.ts` pins these exact values — nine at 20 s and the one 60 s outlier,
+named individually — as well as the 5–60 s range, the same way it already guards the
+`"shell": "bash"` pin. A hook added later cannot quietly reintroduce the ten-minute exposure,
+and the values cannot drift away from the prose that documents them without CI saying so.
+
+Also corrected: `CLAUDE.md` claimed that bumping the plugin version "requires a second commit in
+the parent marketplace repo to bump the submodule pointer." It does not, and that line misled a
+real release. The marketplace resolves this plugin by `url` + `ref: main` — no submodule, no
+pointer, no version pin — so **merging to `main` is the distribution step**. The parent monorepo
+does pin this repo as a submodule and does need a pointer bump, but that is development, not
+distribution. The two are now stated separately, alongside the `release-cli.yml` workflow that
+cuts the `v<version>` tag.
+
 ## plugin 0.99.0 — the CLI-version and missing-CLI warnings were invisible; now they are not
 
 **Every warning `hooks/run-hook.sh` has ever printed reached nobody.** All three of them — the
