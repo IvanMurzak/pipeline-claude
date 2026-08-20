@@ -16,35 +16,48 @@ this file set it nowhere — so every hook inherited Claude Code's default: **60
 every event the plugin registers, except `UserPromptSubmit`, which defaults to 30s. Nothing in
 the plugin bounded a relay that hung. `hooks/run-hook.sh` had already written down the remedy in
 its own comments — *"the lever is `hooks.json`'s per-hook `timeout` field, not shell code here"*
-— and nobody had pulled it. All ten now carry one, and the worst a wedged relay can cost you is
-**45 seconds instead of ten minutes**.
+— and nobody had pulled it. All ten now carry one.
 
-**The numbers are measured, not guessed.** Driving the real shim on a Windows 11 box, every
-relay costs **150–380 ms** warm and idle. A session's *first* hook adds the once-per-session
-`pipeline --version` spawn for **520–980 ms**. The figure that actually sets the budget is one
-hook invocation while the machine is busy with a parallel wave of subagents — **4.1 s** at 8-way
-concurrency, **7.7 s** at 32-way. The relays' own work barely registers next to the process
-spawn: a 2 KB, a 16 MB and a 181 MB transcript all timed the same, 200 pipeline manifests cost
-the prompt matcher no more than one did, and the department notifier's daemon spawn is detached,
-so ensuring the daemon is running costs what skipping it costs. **This is a process-spawn
-budget**, which is why the values are near-uniform rather than tuned per relay — the
-measurements do not support finer distinctions than the three drawn.
+**Nine of the ten get 20 s.** Measured end to end through the shim on a Windows 11 box against a
+63 MB transcript: the hot path — `PostToolUse` → analytics — costs **291 ms** alone, **1.24 s**
+with eight hooks at once and **4.49 s** with thirty-two, so 20 s is ~4.4× the worst contended
+case. Transcript *size* barely matters to analytics (2 KB, 16 MB and 64 MB all land between
+150 ms and 550 ms — it tails from a stored byte offset rather than re-reading), and prompt
+matching is flat too: 200 pipeline manifests cost no more than one. The department notifier is
+**not** the slow relay you might expect — its daemon spawn is detached, so ensuring the daemon
+runs costs what skipping it costs (354–1149 ms either way).
 
-| entries | timeout | why |
-| --- | --- | --- |
-| SessionStart ×2, PreToolUse, PostToolUse, Notification, UserPromptSubmit | **20 s** | ~2.6× the measured 7.7 s worst case — a machine 2.5× slower under the same extreme concurrency is still never cut off |
-| Stop (analytics + stats), SubagentStop (analytics) | **30 s** | they additionally fold a transcript; no harness could provoke that fold, so this headroom guards an **unmeasured** path |
-| SubagentStop (stats) | **45 s** | the only path the CLI's own source declares *unbudgeted* — it folds a pipeline-manager transcript spanning an hours-long run |
+**One entry gets 60 s: `SubagentStop` → stats-relay.** It is the only path the CLI's own source
+declares *unbudgeted* (its `Stop` sibling self-bounds at `STOP_BUDGET_MS = 4000` and measures
+under 1.6 s even with fifty stale records — hence 20 s there). Its cost scales with **stale
+records × transcript bytes**, not either alone:
 
-**`UserPromptSubmit` is the one cap that was lowered rather than introduced** — 30 s to 20 s. It
-holds your prompt for as long as it runs, and it measured under 1 s even with 200 manifests.
+| `tokens: null` records to reconcile, 63 MB transcript | duration |
+| --- | --- |
+| 0 | 0.9 s |
+| 5 | 1.8 s |
+| 20 | 4.6 s |
+| 50 | **9.1 s** |
+| 20, with eight hooks competing for the box | **11.1 s** |
 
-**Being cancelled is safe here.** On expiry Claude Code cancels the hook and discards its output
-entirely, so the hook makes no decision — and a `PreToolUse` timeout does *not* block the tool,
-which continues through the normal permission flow. Every one of these relays is best-effort
-telemetry: a cancelled fold just leaves the record null for a later stop to fill, and none of
-them is a blocking control. That is why generous-but-finite beats a ten-minute default in both
-directions.
+A `.stats` tree that has built up a backlog while a larger transcript is in play extrapolates
+past 45 s, which is why this entry is not on the floor.
+
+**And cancelling that one is not free — which is the reason for the headroom.**
+`statsEnrichTokens` rewrites `runs.jsonl` with a plain non-atomic `writeFileSync` (no temp file,
+no rename), so a timeout landing inside that write can leave a project's run history
+**truncated**. The window is milliseconds wide and the odds are low, but the hazard is *created*
+by this change and did not exist while the default was ten minutes, so it is recorded here
+rather than discovered later. The proper fix — a `budgetMs` on the SubagentStop rung, or an
+atomic write-and-rename — belongs in the CLI repo; a generous timeout is the mitigation
+available from this file.
+
+Cancelling the other nine **is** safe: Claude Code discards a timed-out hook's output, a
+`PreToolUse` timeout does *not* block the tool, and each is best-effort telemetry whose
+cancelled fold just leaves a record for a later stop to fill.
+
+**`UserPromptSubmit` is the one cap lowered rather than introduced** — 30 s to 20 s. It holds
+your prompt for as long as it runs, and it measured well under 1 s even with 200 manifests.
 
 `tests/hook-run-shim.test.ts` now fails CI if any hook omits a `timeout` or sets one outside
 5–60 s, the same way it already guards the `"shell": "bash"` pin — so a hook added later cannot

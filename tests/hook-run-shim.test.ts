@@ -1204,11 +1204,15 @@ describe('hooks/hooks.json wiring', () => {
 
     // The bounds are the contract, not decoration. The LOWER bound keeps a
     // future edit from setting something so tight that a healthy relay is
-    // cancelled on a loaded machine — a single cold invocation was measured at
-    // 7.7s under a 32-way parallel-subagent wave, and the relays' cost is
-    // dominated by the process spawn, not by their own work. The UPPER bound
-    // is the point of the whole change: it makes "a hook may hold a turn for
-    // minutes" unrepresentable in this file.
+    // cancelled on a loaded machine: the hot path (PostToolUse → analytics)
+    // was measured at 4.5s with thirty-two hooks competing for the box, and
+    // SubagentStop → stats — the one unbudgeted transcript walk — at 11.1s
+    // with twenty stale records and eight hooks at once. The UPPER bound is
+    // the point of the whole change: it makes "a hook may hold a turn for
+    // minutes" unrepresentable in this file. 60 is deliberately reachable —
+    // SubagentStop → stats sits exactly there, because cancelling it mid-pass
+    // can truncate a project's runs.jsonl (the rewrite is non-atomic), so it
+    // is the one entry that trades tightness for safety.
     const MIN_TIMEOUT_S = 5;
     const MAX_TIMEOUT_S = 60;
     for (const hook of registered) {
