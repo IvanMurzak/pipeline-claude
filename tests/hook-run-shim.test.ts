@@ -1178,6 +1178,60 @@ describe('hooks/hooks.json wiring', () => {
     }
   });
 
+  test('EVERY command hook carries an explicit `timeout`, in a sane range', () => {
+    // Same shape, and the same argument, as the `"shell": "bash"` guard above.
+    //
+    // Until this assertion existed, NO hook in this file set `timeout` at all,
+    // so every one inherited Claude Code's default: 600s — TEN MINUTES — on
+    // every event registered here except `UserPromptSubmit`, which defaults to
+    // 30s. A wedged relay could hold a turn for ten minutes. `run-hook.sh`
+    // named this exact remedy in its own comments ("the lever is hooks.json's
+    // per-hook `timeout` field, not shell code here") and prose does not fail
+    // CI, so a hook added without one would reintroduce the ten-minute
+    // exposure on that single event while every other event looked fixed —
+    // the identical failure mode the bash pin's guard exists to prevent.
+    const raw = readFileSync(join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout?: unknown }> }>>;
+    };
+    const registered: Array<{ event: string; command: string; timeout?: unknown }> = [];
+    for (const [event, entries] of Object.entries(parsed.hooks)) {
+      for (const entry of entries) {
+        for (const hook of entry.hooks) registered.push({ event, ...hook });
+      }
+    }
+    expect(registered.length).toBe(10);
+
+    // The bounds are the contract, not decoration. The LOWER bound keeps a
+    // future edit from setting something so tight that a healthy relay is
+    // cancelled on a loaded machine — a single cold invocation was measured at
+    // 7.7s under a 32-way parallel-subagent wave, and the relays' cost is
+    // dominated by the process spawn, not by their own work. The UPPER bound
+    // is the point of the whole change: it makes "a hook may hold a turn for
+    // minutes" unrepresentable in this file.
+    const MIN_TIMEOUT_S = 5;
+    const MAX_TIMEOUT_S = 60;
+    for (const hook of registered) {
+      expect(
+        typeof hook.timeout,
+        `hooks.json ${hook.event} hook has no \`timeout\`: ${hook.command}\n` +
+          '  Add a `"timeout": <seconds>` beside `"type"`, `"command"` and `"shell"`.\n' +
+          '  Without it the hook inherits Claude Code\'s default — 600s on every event\n' +
+          '  here except UserPromptSubmit (30s) — so a wedged relay holds the turn for\n' +
+          '  ten minutes. See hooks.json\'s `description` for the measured budget.',
+      ).toBe('number');
+      const t = hook.timeout as number;
+      expect(Number.isInteger(t), `hooks.json ${hook.event} timeout is not a whole number of seconds: ${t}`).toBe(true);
+      expect(
+        t >= MIN_TIMEOUT_S && t <= MAX_TIMEOUT_S,
+        `hooks.json ${hook.event} timeout ${t}s is outside ${MIN_TIMEOUT_S}-${MAX_TIMEOUT_S}s: ${hook.command}\n` +
+          `  Below ${MIN_TIMEOUT_S}s a healthy relay gets cancelled on a loaded machine.\n` +
+          `  Above ${MAX_TIMEOUT_S}s this file is back to letting a hook stall a turn for\n` +
+          '  minutes, which is the exposure the timeouts were added to close.',
+      ).toBe(true);
+    }
+  });
+
   test('every relay this plugin depends on is actually registered somewhere', () => {
     // The inverse of the check above: a relay that no hook event invokes is a
     // relay that silently never runs, which for the journal writers means the

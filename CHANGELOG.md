@@ -8,6 +8,56 @@ repository at `apps/pipeline-cli/` and released from it.** It does not any more 
 Historical entries are left exactly as written; only this masthead is updated, because it
 describes the file rather than recording anything. Earlier history still is in `git log`.
 
+## plugin 0.99.1 — a stuck hook can no longer hold your session for ten minutes
+
+**Every one of this plugin's ten hooks could stall a turn for up to ten minutes, and none of
+them ever set a limit.** `timeout` is a real per-hook field in `hooks.json`, in seconds, and
+this file set it nowhere — so every hook inherited Claude Code's default: **600 seconds** on
+every event the plugin registers, except `UserPromptSubmit`, which defaults to 30s. Nothing in
+the plugin bounded a relay that hung. `hooks/run-hook.sh` had already written down the remedy in
+its own comments — *"the lever is `hooks.json`'s per-hook `timeout` field, not shell code here"*
+— and nobody had pulled it. All ten now carry one, and the worst a wedged relay can cost you is
+**45 seconds instead of ten minutes**.
+
+**The numbers are measured, not guessed.** Driving the real shim on a Windows 11 box, every
+relay costs **150–380 ms** warm and idle. A session's *first* hook adds the once-per-session
+`pipeline --version` spawn for **520–980 ms**. The figure that actually sets the budget is one
+hook invocation while the machine is busy with a parallel wave of subagents — **4.1 s** at 8-way
+concurrency, **7.7 s** at 32-way. The relays' own work barely registers next to the process
+spawn: a 2 KB, a 16 MB and a 181 MB transcript all timed the same, 200 pipeline manifests cost
+the prompt matcher no more than one did, and the department notifier's daemon spawn is detached,
+so ensuring the daemon is running costs what skipping it costs. **This is a process-spawn
+budget**, which is why the values are near-uniform rather than tuned per relay — the
+measurements do not support finer distinctions than the three drawn.
+
+| entries | timeout | why |
+| --- | --- | --- |
+| SessionStart ×2, PreToolUse, PostToolUse, Notification, UserPromptSubmit | **20 s** | ~2.6× the measured 7.7 s worst case — a machine 2.5× slower under the same extreme concurrency is still never cut off |
+| Stop (analytics + stats), SubagentStop (analytics) | **30 s** | they additionally fold a transcript; no harness could provoke that fold, so this headroom guards an **unmeasured** path |
+| SubagentStop (stats) | **45 s** | the only path the CLI's own source declares *unbudgeted* — it folds a pipeline-manager transcript spanning an hours-long run |
+
+**`UserPromptSubmit` is the one cap that was lowered rather than introduced** — 30 s to 20 s. It
+holds your prompt for as long as it runs, and it measured under 1 s even with 200 manifests.
+
+**Being cancelled is safe here.** On expiry Claude Code cancels the hook and discards its output
+entirely, so the hook makes no decision — and a `PreToolUse` timeout does *not* block the tool,
+which continues through the normal permission flow. Every one of these relays is best-effort
+telemetry: a cancelled fold just leaves the record null for a later stop to fill, and none of
+them is a blocking control. That is why generous-but-finite beats a ten-minute default in both
+directions.
+
+`tests/hook-run-shim.test.ts` now fails CI if any hook omits a `timeout` or sets one outside
+5–60 s, the same way it already guards the `"shell": "bash"` pin — so a hook added later cannot
+quietly reintroduce the ten-minute exposure on one event while every other event looks fixed.
+
+Also corrected: `CLAUDE.md` claimed that bumping the plugin version "requires a second commit in
+the parent marketplace repo to bump the submodule pointer." It does not, and that line misled a
+real release. The marketplace resolves this plugin by `url` + `ref: main` — no submodule, no
+pointer, no version pin — so **merging to `main` is the distribution step**. The parent monorepo
+does pin this repo as a submodule and does need a pointer bump, but that is development, not
+distribution. The two are now stated separately, alongside the `release-cli.yml` workflow that
+cuts the `v<version>` tag.
+
 ## plugin 0.99.0 — the CLI-version and missing-CLI warnings were invisible; now they are not
 
 **Every warning `hooks/run-hook.sh` has ever printed reached nobody.** All three of them — the
